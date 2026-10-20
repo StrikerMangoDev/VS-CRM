@@ -54,23 +54,26 @@ export function useInfiniteLeadPage(initial: LeadPage, query: LeadQuery) {
   return useInfinitePage(initial,query,getLeadPage)
 }
 export function useInfinitePage<Q,T extends {rows:{id:string}[];page:number;size:number;total:number;revision:string}>(initial:T,query:Q,load:(query:Q&{page:number})=>Promise<T>) {
-  const key=JSON.stringify(query), loading=useRef(false)
+  const key=JSON.stringify(query), loading=useRef<symbol|null>(null)
   const [sentinel,setSentinel]=useState<HTMLTableRowElement|null>(null)
   const [state,setState]=useState({key,pages:[initial]})
   useEffect(()=>{
-    let active=true;loading.current=true
-    load({...JSON.parse(key),page:1}).then(page=>{if(active)setState({key,pages:[page]})}).catch(()=>toast.error('Unable to load records')).finally(()=>{if(active)loading.current=false})
+    let active=true;const request=Symbol();loading.current=request
+    load({...JSON.parse(key),page:1}).then(page=>{if(active)setState({key,pages:[page]})}).catch(()=>{if(active)toast.error('Unable to load records')}).finally(()=>{if(loading.current===request)loading.current=null})
     return()=>{active=false}
   },[key,initial.revision,load])
   useEffect(()=>{
-    const target=sentinel;if(!target)return
+    // Observe the last real row: empty table rows can fall outside fractional scroll boundaries.
+    const target=sentinel?.previousElementSibling||sentinel;if(!target)return
+    let root=target.parentElement
+    while(root&&!/(auto|scroll|overlay)/.test(getComputedStyle(root).overflowY))root=root.parentElement
     let active=true
     const observer=new IntersectionObserver(entries=>{
       const last=state.pages.at(-1)!
       if(!entries.some(e=>e.isIntersecting)||loading.current||state.key!==key||last.page*last.size>=last.total)return
-      loading.current=true
-      load({...JSON.parse(key),page:last.page+1}).then(page=>{if(active)setState(previous=>previous.key===key?{key,pages:page.page<=last.page?[page]:[...previous.pages,page]}:previous)}).catch(()=>toast.error('Unable to load more records')).finally(()=>{loading.current=false})
-    },{root:target.closest('.table-container'),rootMargin:'150px'})
+      const request=Symbol();loading.current=request
+      load({...JSON.parse(key),page:last.page+1}).then(page=>{if(active)setState(previous=>previous.key===key?{key,pages:page.page<=last.page?[page]:[...previous.pages,page]}:previous)}).catch(()=>{if(active)toast.error('Unable to load more records')}).finally(()=>{if(loading.current===request)loading.current=null})
+    },{root,rootMargin:'150px 0px'})
     observer.observe(target);return()=>{active=false;observer.disconnect()}
   },[key,state,sentinel,load])
   const pages=state.key===key?state.pages:[]

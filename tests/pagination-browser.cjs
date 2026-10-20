@@ -4,7 +4,7 @@ exports.seed=async function(db,actors,webinar,portal,tag){
   const prefix='Pagination '+tag,partPrefix='Payment '+tag,portalPrefix='Portal '+tag,dialPrefix='Dialer '+tag
   for(let i=0;i<35;i++)await db.lead.create({data:{uniqueId:'UI-PAGE-'+tag+'-'+i,name:prefix+' '+String(i).padStart(3,'0'),mobileNumber:'9899000000',webinarId:webinar.id,webinarName:webinar.name,paymentStatus:'NO_PAYMENT',state:'PageState '+tag,assignments:{create:{userId:actors.sales.id,stage:'FRESH_LOG'}}}})
   await db.lead.createMany({data:Array.from({length:65},(_,i)=>({uniqueId:'UI-PAID-'+tag+'-'+i,name:partPrefix+' '+String(i).padStart(3,'0'),mobileNumber:'9899000001',webinarId:webinar.id,webinarName:webinar.name,paymentStatus:'PART_PAYMENT',totalPayment:4000,partPaymentAmount:4000,state:partPrefix}))})
-  await db.orgModule.update({where:{id:portal.id},data:{columnsConfig:JSON.stringify([{id:'topic',name:'Topic',type:'TEXT'}])}})
+  await db.orgModule.update({where:{id:portal.id},data:{columnsConfig:JSON.stringify([{id:'topic',name:'Topic',type:'TEXT'},{id:'notes',name:'Notes',type:'TEXT'}])}})
   await db.lead.createMany({data:Array.from({length:65},(_,i)=>({uniqueId:'UI-PORTAL-'+tag+'-'+i,name:portalPrefix+' '+i,mobileNumber:'9899000002',paymentStatus:'NO_PAYMENT',currentModuleId:portal.id,customData:JSON.stringify({topic:portalPrefix+' '+String(i).padStart(3,'0')})}))})
   const dialer=await db.lead.create({data:{uniqueId:'UI-DIALER-'+tag,name:dialPrefix,mobileNumber:'9899000003',paymentStatus:'NO_PAYMENT',currentModuleId:'EXTRA_DIALER',remark1:dialPrefix,assignments:{create:{userId:actors.sales.id,stage:'EXTRA_DIALER'}}}})
   await db.callRecord.createMany({data:Array.from({length:65},(_,i)=>({leadId:dialer.id,userId:actors.sales.id,smartfloRefId:'UI-CALL-'+tag+'-'+i,duration:0,createdAt:new Date(Date.now()-i*1000)}))})
@@ -15,7 +15,12 @@ exports.check=async function({browser,db,actors,webinar,portal,department,fixtur
   const {context:admin,page:p}=await contextFor(actors.admin)
   const goto=async(page,route)=>{const res=await page.goto('http://127.0.0.1:4319'+route,{waitUntil:'networkidle'});assert.equal(res.status(),200)}
   const matching=(page,prefix)=>page.locator('tbody tr').filter({hasText:prefix})
-  async function more(page){await page.locator('tr[aria-hidden=true]').last().evaluate(el=>el.scrollIntoView({block:'end'}))}
+  async function more(page){
+    const table=page.locator('table').filter({has:page.locator('tr[aria-hidden=true]')}).last()
+    const before=await table.locator('tbody tr').count()
+    await table.hover()
+    for(let i=0;i<30;i++){await page.mouse.wheel(0,700);await page.waitForTimeout(100);if(await table.locator('tbody tr').count()!==before)return}
+  }
   async function exportRows(page,prefix,count){const pending=page.waitForEvent('download');await page.getByRole('button',{name:/Export CSV/}).click();const download=await pending;const text=fs.readFileSync(await download.path(),'utf8');const rows=require('papaparse').parse(text,{header:true,skipEmptyLines:true}).data;assert.equal(rows.filter(row=>row.Name?.startsWith(prefix)).length,count)}
   try{
     await goto(p,'/');await p.getByPlaceholder('Search leads by ID, Name, Mobile, Email...').fill(fixture.prefix)
@@ -66,10 +71,23 @@ exports.check=async function({browser,db,actors,webinar,portal,department,fixtur
     results.push('sales executive pagination and off-page search use the full authorized dataset: PASS')
     await goto(s,'/portal/'+department.id+'/'+portal.id)
     await expect(matching(s,fixture.portalPrefix)).toHaveCount(50)
+    const exported=s.waitForEvent('download');await s.getByRole('button',{name:'Export',exact:true}).click()
+    const portalCsv=require('papaparse').parse(fs.readFileSync(await (await exported).path(),'utf8'),{header:true,skipEmptyLines:true}).data
+    assert.equal(portalCsv.length,65);assert.equal(new Set(portalCsv.map(row=>row.Topic)).size,65)
     await more(s);await expect(matching(s,fixture.portalPrefix)).toHaveCount(65)
+    await s.getByRole('button',{name:'Filter',exact:true}).click()
+    await s.getByRole('combobox',{name:'Filter column',exact:true}).selectOption('topic')
+    await s.getByRole('textbox',{name:'Filter value',exact:true}).fill('064')
+    await s.getByRole('button',{name:'Apply',exact:true}).click()
+    await expect(matching(s,fixture.portalPrefix)).toHaveCount(1)
+    const filteredExport=s.waitForEvent('download');await s.getByRole('button',{name:'Export',exact:true}).click()
+    const filteredCsv=require('papaparse').parse(fs.readFileSync(await (await filteredExport).path(),'utf8'),{header:true,skipEmptyLines:true}).data
+    assert.equal(filteredCsv.length,1);assert.equal(filteredCsv[0].Topic,fixture.portalPrefix+' 064')
+    await s.getByRole('button',{name:'Filter',exact:true}).click();await s.getByRole('button',{name:'Clear',exact:true}).click()
+    await expect(matching(s,fixture.portalPrefix)).toHaveCount(50)
     await s.getByPlaceholder('Search records...').fill(fixture.portalPrefix+' 064')
     await expect(matching(s,fixture.portalPrefix)).toHaveCount(1)
-    results.push('custom portal scroll paging and search preserve mapped-team access: PASS')
+    results.push('custom portal wheel scrolling, column filters, full and filtered CSV exports preserve mapped-team access: PASS')
     await s.getByPlaceholder('Search records...').fill('')
     await expect(matching(s,fixture.portalPrefix)).toHaveCount(50)
     await db.lead.deleteMany({where:{uniqueId:{in:Array.from({length:16},(_,i)=>'UI-PORTAL-'+fixture.tag+'-'+i)}}})

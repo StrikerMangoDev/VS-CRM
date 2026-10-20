@@ -27,7 +27,8 @@ export default function SalesCallReportPage() {
 
   useEffect(() => {
     let active=true
-    getSalesCallReportAction(selectedDate.toISOString()).then(data=>{if(active)setReportData(data)}).catch(error=>console.error('Failed to fetch report:',error)).finally(()=>{if(active)setLoading(false)})
+    const date=[selectedDate.getFullYear(),String(selectedDate.getMonth()+1).padStart(2,'0'),String(selectedDate.getDate()).padStart(2,'0')].join('-')
+    getSalesCallReportAction(date).then(data=>{if(active)setReportData(data)}).catch(error=>{if(active)console.error('Failed to fetch report:',error)}).finally(()=>{if(active)setLoading(false)})
     return()=>{active=false}
   }, [selectedDate])
 

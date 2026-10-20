@@ -155,6 +155,33 @@ integration('database pagination, full-dataset filters and selections preserve s
   assert.equal(longExport.length,1005);assert.equal(new Set(longExport.map(r=>r.id)).size,1005)
   await db.lead.deleteMany({where:{uniqueId:{startsWith:longPrefix}}})
 })
+integration('sales call reports use calendar dates and reject invalid date filters', async () => {
+  const reports=load('src/app/actions/reports.ts')
+  const rows=await run('admin',()=>reports.getSalesCallReportAction('2026-10-20'))
+  assert.ok(rows.some(row=>row.userId===users.exec.id));assert.ok(rows.every(row=>Number.isFinite(row.totalCalls)))
+  for(const date of ['2026-10-20T00:00:00.000Z','2026-02-30','2026-13-01','invalid'])await assert.rejects(()=>run('admin',()=>reports.getSalesCallReportAction(date)),/Invalid report date/)
+  await assert.rejects(()=>run('exec',()=>reports.getSalesCallReportAction('2026-10-20')),/Forbidden/)
+})
+integration('portal filters and full exports stay within the authorized module across pages', async () => {
+  const actions=load('src/app/actions/lead-query.ts'),tag='PORTAL-'+randomBytes(5).toString('hex')
+  const department=await db.orgDepartment.create({data:{name:tag,userMatchRule:'Sales Department'}})
+  const team=await db.orgTeam.create({data:{name:tag,departmentId:department.id,userMatchRule:'SALES'}})
+  const module=await db.orgModule.create({data:{name:tag,departmentId:department.id,columnsConfig:JSON.stringify([{id:'topic',name:'Topic',type:'TEXT'},{id:'number',name:'Number',type:'NUMBER'}]),allowedTeams:{connect:{id:team.id}}}})
+  await db.lead.createMany({data:Array.from({length:65},(_,i)=>({uniqueId:tag+'-'+i,name:tag,mobileNumber:'',paymentStatus:'NO_PAYMENT',currentModuleId:module.id,customData:JSON.stringify({topic:i===64?'Off-page "Unicode हिंदी" %_':'Common topic',number:i})}))})
+  await db.lead.createMany({data:['invalid JSON','null','[]'].map((customData,i)=>({uniqueId:tag+'-bad-'+i,name:tag,mobileNumber:'',paymentStatus:'NO_PAYMENT',currentModuleId:module.id,customData}))})
+  await db.lead.create({data:{uniqueId:tag+'-outside',name:tag,mobileNumber:'',paymentStatus:'NO_PAYMENT',customData:JSON.stringify({topic:'Off-page "Unicode हिंदी" %_'})}})
+  const query={sheet:'PORTAL',moduleId:module.id,departmentId:department.id,size:50}
+  const first=await run('exec',()=>actions.getLeadPage(query));assert.equal(first.total,68);assert.equal(first.rows.length,50)
+  const filtered={...query,portalColumn:'topic',portalValue:'unicode हिंदी',search:'%_'}
+  const page=await run('exec',()=>actions.getLeadPage(filtered));assert.equal(page.total,1);assert.equal(page.rows[0].uniqueId,tag+'-64')
+  const ids=await run('exec',()=>actions.getLeadSelection(filtered));assert.deepEqual(ids,page.rows.map(row=>row.id))
+  const exported=await run('exec',()=>load('src/hooks/use-lead-page.ts').allMatchingLeads(query));assert.equal(exported.length,68);assert.equal(new Set(exported.map(row=>row.id)).size,68)
+  const zero=await run('exec',()=>actions.getLeadPage({...query,portalColumn:'number',portalValue:'0'}));assert.equal(zero.total,7)
+  await assert.rejects(()=>run('tech',()=>actions.getLeadSelection(filtered)),/Forbidden/)
+  await assert.rejects(()=>run('exec',()=>actions.getLeadPage({...filtered,departmentId:'wrong'})),/Module not found/)
+  await assert.rejects(()=>run('exec',()=>actions.getLeadPage({...filtered,portalColumn:"topic') OR true--"})),/Invalid portal filter/)
+  await assert.rejects(()=>run('exec',()=>actions.getLeadSelection({...filtered,portalValue:'x'.repeat(1001)})),/Invalid portal filter/)
+})
 integration('call histories paginate all matches and preserve full dialer queues and owner scope', async () => {
   const actions=load('src/app/actions/lead-query.ts'),tag='CALLPAGE-'+randomBytes(5).toString('hex')
   const lead=await db.lead.create({data:{uniqueId:tag,name:tag,mobileNumber:'9999155511',remark1:tag,paymentStatus:'NO_PAYMENT',currentModuleId:'EXTRA_DIALER',assignments:{create:{userId:users.exec.id,stage:'EXTRA_DIALER'}}}})

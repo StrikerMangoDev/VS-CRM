@@ -10,6 +10,7 @@ export type LeadQuery = {
   lastCallStart?: string; lastCallEnd?: string; followStart?: string; followEnd?: string
   tab?: 'daily_paid' | 'welcome_call' | 'access'; sort?: string; direction?: 'asc' | 'desc' | null
   idFrom?: string; idTo?: string; assignment?: string; ids?: string[]; analytics?: boolean; moduleId?:string; departmentId?:string
+  portalColumn?: string; portalValue?: string
 }
 export const leadInclude = { assignments: { include: { user: { select: { id: true, name: true, department: true, subTeam: true, mainDepartment: true } } } }, callRecords: { orderBy: { createdAt: 'desc' as const }, take: 1 } } satisfies Prisma.LeadInclude
 export type LeadRow = Prisma.LeadGetPayload<{ include: typeof leadInclude }> & { webinarAttendanceCount?: number }
@@ -51,6 +52,7 @@ export function leadFilters(q: LeadQuery) {
   if(q.ids)conditions.push(q.ids.length?Prisma.sql`l.id=ANY(${q.ids}::text[])`:Prisma.sql`FALSE`)
   const master = ['MASTER','EXTRA_DIALER'].includes(q.sheet)
   if (q.search) conditions.push(q.sheet==='PORTAL' ? contains('customData',q.search) : Prisma.sql`(${Prisma.join((master ? ['uniqueId','name','mobileNumber','email','state'] : ['uniqueId','name','mobileNumber','email']).map(name=>contains(name,q.search!)), ' OR ')} ${master ? Prisma.sql`OR strpos(lower(coalesce(${webinar},'')),lower(${q.search}))>0` : Prisma.empty})`)
+  if(q.sheet==='PORTAL'&&q.portalColumn&&q.portalValue)conditions.push(Prisma.sql`strpos(lower(coalesce((CASE WHEN l."customData" IS JSON OBJECT THEN l."customData"::json ELSE '{}'::json END)->>${q.portalColumn},'')),lower(${q.portalValue}))>0`)
   if (q.webinar) conditions.push(['PART_PAYMENT','FULL_PAYMENT'].includes(q.sheet) ? Prisma.sql`(l."webinarId"=${q.webinar} OR l."webinarName"=${q.webinar})` : Prisma.sql`${webinar}=${q.webinar}`)
   for (const [key,name] of [['payment','paymentStatus'],['state','state'],['leadStatus','leadStatus']] as const) if(q[key] && q[key]!=='all') conditions.push(Prisma.sql`${field(name)}=${q[key]}`)
   if (q.whatsapp) conditions.push(Prisma.sql`l."whatsappJoined"=${q.whatsapp==='JOINED'}`)
@@ -93,7 +95,17 @@ function order(q: LeadQuery) {
   }
   return Prisma.sql`${q.direction===null?sorts.createdAt:sorts[q.sort||'createdAt']||sorts.uniqueId} ${q.direction==='asc'?Prisma.raw('ASC'):Prisma.raw('DESC')}, l.id ASC`
 }
-async function queryUser(q:LeadQuery){if(q.sheet==='PORTAL'){await requireModuleAccess(q.moduleId||'',q.departmentId);return requireUser()}return requireSales()}
+async function queryUser(q:LeadQuery){
+  if(q.sheet==='PORTAL'){
+    const module=await requireModuleAccess(q.moduleId||'',q.departmentId)
+    if(q.portalColumn||q.portalValue){
+      const columns:unknown=JSON.parse(module.columnsConfig||'[]')
+      if(typeof q.portalColumn!=='string'||typeof q.portalValue!=='string'||q.portalValue.length>1000||!Array.isArray(columns)||!columns.some(col=>col&&col.id===q.portalColumn))throw new Error('Invalid portal filter')
+    }
+    return requireUser()
+  }
+  return requireSales()
+}
 export async function queryLeadPage(q: LeadQuery): Promise<LeadPage> {
   const user=await queryUser(q), scope=leadScope(q,user), conditions=[...scope,...leadFilters(q)]
   const size=Math.max(1,Math.min(1000,Math.floor(Number(q.size)||15))), requested=Math.max(1,Math.floor(Number(q.page)||1))

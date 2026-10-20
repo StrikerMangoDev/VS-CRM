@@ -1,17 +1,30 @@
 'use client'
-import { useInfiniteLeadPage } from '@/hooks/use-lead-page';
-import type { LeadPage } from '@/lib/lead-query';
+import { allMatchingLeads,useInfiniteLeadPage } from '@/hooks/use-lead-page';
+import type { LeadPage,LeadQuery } from '@/lib/lead-query';
+import Papa from 'papaparse';
+import toast from 'react-hot-toast';
 
 import React,{ useState,useMemo } from 'react';
 import { Plus,Search,Filter,Download,MoreHorizontal,X } from 'lucide-react';
 import { addDynamicRecord } from '@/app/actions/portal';
+
+function recordData(customData: string|null): Record<string,unknown> {
+  try { const data:unknown=JSON.parse(customData||'{}');return data&&typeof data==='object'&&!Array.isArray(data)?data as Record<string,unknown>:{}; }
+  catch { return {}; }
+}
 
 export default function DynamicDataTable({ module, department, initialPage }: { module: import('@prisma/client').OrgModule, department: import('@prisma/client').OrgDepartment, initialPage: LeadPage }) {
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState<Record<string,string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [pageData,sentinel]=useInfiniteLeadPage(initialPage,{sheet:'PORTAL',moduleId:module.id,departmentId:department.id,search,size:50})
+  const [isExporting,setIsExporting]=useState(false);
+  const [showFilters,setShowFilters]=useState(false);
+  const [filterColumn,setFilterColumn]=useState('');
+  const [filterValue,setFilterValue]=useState('');
+  const [filter,setFilter]=useState<{portalColumn?:string;portalValue?:string}>({});
+  const query:LeadQuery={sheet:'PORTAL',moduleId:module.id,departmentId:department.id,search,size:50,...filter};
+  const [pageData,sentinel]=useInfiniteLeadPage(initialPage,query)
   const initialRecords=pageData.rows
 
   // Parse columns config safely
@@ -29,15 +42,19 @@ export default function DynamicDataTable({ module, department, initialPage }: { 
 
   // Parse records customData safely
   const records = useMemo(() => {
-    return initialRecords.map(rec => {
-      try {
-        const parsedData = rec.customData ? JSON.parse(rec.customData) : {};
-        return { ...rec, dynamicData: parsedData as Record<string,unknown> };
-      } catch {
-        return { ...rec, dynamicData: {} };
-      }
-    });
+    return initialRecords.map(rec => ({...rec,dynamicData:recordData(rec.customData)}));
   }, [initialRecords]);
+
+  const exportRecords=async()=>{
+    setIsExporting(true);
+    try {
+      const rows=await allMatchingLeads(query);
+      const csv=Papa.unparse({fields:columns.map(col=>col.name),data:rows.map(row=>{const data=recordData(row.customData);return columns.map(col=>String(data[col.id]??''));})},{escapeFormulae:true});
+      const url=URL.createObjectURL(new Blob(['\uFEFF',csv],{type:'text/csv;charset=utf-8;'}));
+      const link=document.createElement('a');link.href=url;link.download=`${module.name.replace(/[<>:"/\\|?*]/g,'_')}.csv`;link.click();URL.revokeObjectURL(url);
+    } catch { toast.error('Unable to export records'); }
+    finally { setIsExporting(false); }
+  };
 
   // Handle Form Change
   const handleInputChange = (colId: string, value:string) => {
@@ -72,7 +89,7 @@ export default function DynamicDataTable({ module, department, initialPage }: { 
           <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{department.name} • {pageData.total} Records</div>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <button style={{ background: 'var(--table-hover)', color: 'var(--text-primary)', border: '1px solid var(--card-border)', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <button onClick={()=>void exportRecords()} disabled={isExporting||columns.length===0} aria-busy={isExporting} style={{ background: 'var(--table-hover)', color: 'var(--text-primary)', border: '1px solid var(--card-border)', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
             <Download size={16} /> Export
           </button>
           <button 
@@ -96,9 +113,28 @@ export default function DynamicDataTable({ module, department, initialPage }: { 
             style={{ width: '100%', background: 'var(--table-hover)', border: '1px solid var(--card-border)', color: 'var(--text-primary)', padding: '10px 12px 10px 36px', borderRadius: '8px', outline: 'none' }}
           />
         </div>
-        <button style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--card-border)', padding: '8px 12px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+        <div style={{position:'relative'}}>
+        <button onClick={()=>setShowFilters(value=>!value)} aria-expanded={showFilters} aria-controls={`portal-filter-${module.id}`} style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--card-border)', padding: '8px 12px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
           <Filter size={16} /> Filter
         </button>
+        {showFilters&&(
+          <form id={`portal-filter-${module.id}`} aria-label="Filter records" onSubmit={e=>{e.preventDefault();setFilter(filterValue?{portalColumn:filterColumn||columns[0]?.id,portalValue:filterValue}:{});setShowFilters(false);}} onKeyDown={e=>{if(e.key==='Escape')setShowFilters(false);}} style={{position:'absolute',right:0,top:'calc(100% + 8px)',zIndex:20,width:'280px',padding:'16px',background:'var(--card-bg)',border:'1px solid var(--card-border)',borderRadius:'12px',display:'flex',flexDirection:'column',gap:'12px'}}>
+            <label style={{color:'var(--text-muted)',fontSize:'0.85rem'}}>Column
+              <select aria-label="Filter column" value={filterColumn||columns[0]?.id||''} onChange={e=>setFilterColumn(e.target.value)} style={{width:'100%',marginTop:'6px',padding:'8px',background:'var(--card-bg)',color:'var(--text-primary)',border:'1px solid var(--card-border)',borderRadius:'8px'}}>
+                {columns.map(col=><option key={col.id} value={col.id}>{col.name}</option>)}
+              </select>
+            </label>
+            <label style={{color:'var(--text-muted)',fontSize:'0.85rem'}}>Contains
+              <input aria-label="Filter value" value={filterValue} maxLength={1000} onChange={e=>setFilterValue(e.target.value)} style={{width:'100%',marginTop:'6px',padding:'8px',background:'var(--table-hover)',color:'var(--text-primary)',border:'1px solid var(--card-border)',borderRadius:'8px'}} />
+            </label>
+            <div style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
+              <button type="button" className="btn" onClick={()=>{setFilter({});setFilterValue('');setShowFilters(false);}}>Clear</button>
+              <button type="button" className="btn" onClick={()=>setShowFilters(false)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={columns.length===0}>Apply</button>
+            </div>
+          </form>
+        )}
+        </div>
       </div>
 
       {/* Data Table */}

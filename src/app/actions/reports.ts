@@ -31,10 +31,13 @@ export async function getSalesCallReportAction(targetDate?: string): Promise<Sal
 
   let year, month, day;
   if (targetDate) {
+    if(typeof targetDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(targetDate))throw new Error('Invalid report date')
     const parts = targetDate.split('-');
     year = Number(parts[0]);
     month = Number(parts[1]);
     day = Number(parts[2]);
+    const date=new Date(Date.UTC(year,month-1,day))
+    if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)throw new Error('Invalid report date')
   } else {
     // Get current date in IST
     const now = new Date();
