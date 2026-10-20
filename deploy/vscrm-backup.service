@@ -1,0 +1,10 @@
+[Unit]
+Description=VS CRM database backup to private Cloud Storage
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/vscrm/backup.sh
+User=root
+UMask=0077

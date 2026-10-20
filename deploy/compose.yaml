@@ -1,0 +1,69 @@
+name: vscrm
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vscrm
+      POSTGRES_USER: vscrm
+      POSTGRES_PASSWORD_FILE: /run/secrets/database-password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - /run/vscrm/database-password:/run/secrets/database-password:ro
+    command: [postgres, -c, max_connections=30, -c, shared_buffers=128MB, -c, work_mem=4MB]
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U vscrm -d vscrm]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: &logging
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+  app:
+    image: ${APP_IMAGE:?Set the tested application image}
+    entrypoint: [node, /app/deploy/runtime-entrypoint.cjs]
+    command: [node, node_modules/next/dist/bin/next, start, --hostname, 0.0.0.0, --port, "3000"]
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      DIRECT_URL: ""
+      APP_URL: https://${CRM_HOSTNAME:?Set the HTTPS hostname}
+      NODE_OPTIONS: --max-old-space-size=640
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_REQUIRE_TLS: "true"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+    volumes:
+      - /run/vscrm/runtime.json:/run/secrets/runtime.json:ro
+      - ./runtime-entrypoint.cjs:/app/deploy/runtime-entrypoint.cjs:ro
+      - ./rotate-admin.cjs:/app/deploy/rotate-admin.cjs:ro
+    mem_limit: 896m
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+  web:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app: {condition: service_healthy}
+    environment:
+      CRM_HOSTNAME: ${CRM_HOSTNAME}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 128m
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

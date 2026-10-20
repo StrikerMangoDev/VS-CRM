@@ -1,0 +1,17 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const { PrismaClient } = require('@prisma/client')
+const { PrismaPg } = require('@prisma/adapter-pg')
+const { Pool } = require('pg')
+const bcrypt = require('bcryptjs')
+const input = JSON.parse(fs.readFileSync(0, 'utf8'))
+assert.match(input.email, /^[^\s@]+@[^\s@]+\.[^\s@]+$/)
+assert.ok(typeof input.password === 'string' && input.password.length >= 20 && input.password.length <= 72)
+const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+const db = new PrismaClient({ adapter: new PrismaPg(pool) })
+async function main() {
+  assert.equal(await db.user.count(), 0, 'Bootstrap requires an empty user table; existing accounts are never overwritten')
+  await db.user.create({data:{email:input.email.trim().toLowerCase(),name:'CRM Administrator',password:await bcrypt.hash(input.password,12),role:'ADMIN',department:'ALL',mainDepartment:'Sales Department'}})
+  console.log('Administrator created. No demo accounts or business records imported.')
+}
+main().catch(error=>{console.error(error.message);process.exitCode=1}).finally(async()=>{await db.$disconnect();await pool.end()})

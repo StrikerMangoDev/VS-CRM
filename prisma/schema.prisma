@@ -1,0 +1,665 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id         String   @id @default(cuid())
+  email      String   @unique
+  mobileNumber String?
+  employeeId String?
+  name       String
+  role       String   // "TL" or "EXEC"
+  mainDepartment String   @default("Sales Department") // "Sales Department", "Social Media"
+  department     String   // "SALES", "RECOVERY", "TECHNICAL" (This is Sub-Department)
+  subTeam        String?  // "TECH", "ACCESS", "WELCOME_CALL"
+  isActive       Boolean  @default(true)
+  password       String?
+  resetToken     String?
+  resetTokenExpiry DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  sessions       Session[]
+  
+  assignments Assignment[]
+  actionLogs  ActionLog[]
+  callRecords CallRecord[]
+  createdIssues Issue[] @relation("IssueCreator")
+  ownedIssues   Issue[] @relation("IssueOwner")
+  issueHistories IssueHistory[]
+  
+  managedDepartments OrgDepartment[] @relation("DepartmentManager")
+  ledTeams           OrgTeam[]       @relation("TeamLeader")
+  ownedModules       OrgModule[]     @relation("ModuleOwner")
+  
+  editedContent      ContentRecord[] @relation("ContentEditor")
+  approvedContent    ContentRecord[] @relation("ContentApprover")
+  postedContent      ContentRecord[] @relation("ContentPoster")
+  designedContent    ContentRecord[] @relation("ContentGraphicDesigner")
+  
+  assignedTasks      TaskRecord[]    @relation("TaskAssignee")
+  socialMediaTarget  SocialMediaUserTarget?
+  adCreatives        AdCreativeRecord[] @relation("AdCreativeEditor")
+  postingDailyTasks  PostingDailyTask[] @relation("UserPostingTasks")
+  userShifts         UserShift[]        @relation("UserShifts")
+}
+
+model Session {
+  tokenHash String @id
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model SecurityAttempt {
+  key String @id
+  attempts Int @default(1)
+  expiresAt DateTime
+  @@index([expiresAt])
+}
+
+model RecordSequence {
+  key String @id
+  value Int
+}
+
+model PaymentImport {
+  fingerprint String @id
+  createdAt DateTime @default(now())
+}
+
+model IntegrationCredential {
+  key String @id
+  value String
+}
+
+model PostingDailyTask {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation("UserPostingTasks", fields: [userId], references: [id])
+  date           DateTime
+  polls          Int      @default(0)
+  quizzes        Int      @default(0)
+  communityPosts Int      @default(0)
+  commentsReply  Int      @default(0)
+  captionsFound  Int      @default(0)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@unique([userId, date])
+}
+
+model Lead {
+  id                String   @id @default(cuid())
+  uniqueId          String   @unique
+  name              String
+  mobileNumber      String
+  email             String?
+  totalPayment      Float    @default(0)
+  partPaymentAmount Float    @default(0)
+  fullPaymentAmount Float    @default(0)
+  partPaymentId     String?
+  fullPaymentId     String?
+  amount1           Float?
+  amount2           Float?
+  amount3           Float?
+  discount          Float?
+  salesAmount       Float?
+  recoveryAmount    Float?
+  paymentStatus     String   // "NO_PAYMENT", "PART_PAYMENT", "FULL_PAYMENT"
+  paymentDate       DateTime?
+  whatsappJoined    Boolean  @default(false)
+  lmsAccessGranted  Boolean  @default(false)
+  enrollmentCompleted Boolean @default(false)
+  updateStatusDate  DateTime?
+  accessStatus      String   @default("Pending")
+  accessType        String?
+  frozenLeadStatus  String?
+  frozenLeadLogStatus String? // "Fresh Log", "New Log", "Old Log"
+  recoveryAssignedAt DateTime? // When the lead was assigned to Recovery Team
+  state             String?
+  webinarName       String?
+  webinarId         String?
+  isTransferred     Boolean @default(false)
+  webinar           WebinarMaster? @relation(fields: [webinarId], references: [id])
+  leadStatus        String   @default("IN_PROGRESS") // "IN_PROGRESS", "CLOSED"
+  callStatus        String   @default("UNTOUCHED") // "UNTOUCHED", "CALL_CONNECTED", "CALL_NOT_CONNECTED"
+  nextFollowUpDate  DateTime?
+  remark1           String?
+  remark2           String?
+  whatsappTemplate   String?
+  whatsappSentAt     DateTime?
+  customData        String   @default("{}") // Stores dynamic custom column values as JSON string
+  currentModuleId   String?  // Tracks which dynamic sheet this lead currently resides in
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments Assignment[]
+  actionLogs  ActionLog[]
+  callRecords CallRecord[]
+  auditLogs   AuditHistory[]
+  @@index([mobileNumber, webinarId])
+  @@index([email, webinarId])
+  @@index([currentModuleId, createdAt])
+  @@index([paymentStatus, paymentDate])
+}
+
+model CustomColumn {
+  id               String   @id @default(cuid())
+  name             String
+  type             String   @default("TEXT") // "TEXT", "NUMBER", "DATE"
+  departmentTarget String   // "SALES", "SOCIAL_MEDIA", "ALL"
+  createdAt        DateTime @default(now())
+}
+
+model Assignment {
+  id        String   @id @default(cuid())
+  leadId    String
+  userId    String
+  stage     String   // "FRESH_LOG", "NEXT_LOG", "OLD_LOG", "COMPLETED", "IN_PROGRESS"
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lead Lead @relation(fields: [leadId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, leadId])
+  @@index([leadId])
+}
+
+model ActionLog {
+  id              String   @id @default(cuid())
+  leadId          String
+  userId          String
+  connected       Boolean
+  amountCollected Float    @default(0)
+  remarks         String?
+  
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CallRecord {
+  id           String   @id @default(cuid())
+  leadId       String
+  userId       String
+  smartfloRefId String  @unique
+  status       String   @default("COMPLETED")
+  duration     Int      @default(0)
+  recordingUrl String?
+  
+  createdAt    DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+  @@index([leadId, createdAt])
+}
+
+model WebinarCategory {
+  id        String   @id @default(cuid())
+  code      String   @unique // VST, AST, NUM
+  name      String   @unique // Vastu, Astrology, Numerology
+  createdAt DateTime @default(now())
+  
+  webinars  WebinarMaster[]
+}
+
+model WebinarMaster {
+  id               String   @id // E.g. VST-001 (generated based on category)
+  categoryId       String
+  category         WebinarCategory @relation(fields: [categoryId], references: [id])
+  name             String
+  date             DateTime
+  endDate          DateTime
+  startTime        String?
+  endTime          String?
+  status           String   @default("SCHEDULED") // SCHEDULED, LIVE, COMPLETED, CANCELLED
+  description      String?
+  whatsappGroupUrl String
+  webinarUrl       String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leads       Lead[]
+  recordings  WebinarRecording[]
+}
+
+model WebinarRecording {
+  id          String   @id @default(cuid())
+  webinarId   String
+  title       String
+  url         String
+  duration    String?
+  description String?
+  
+  createdAt DateTime @default(now())
+  
+  webinar WebinarMaster @relation(fields: [webinarId], references: [id])
+}
+
+model AuditHistory {
+  id        String   @id @default(cuid())
+  leadId    String
+  userName  String
+  userRole  String
+  field     String
+  oldValue  String
+  newValue  String
+  createdAt DateTime @default(now())
+
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  @@index([leadId, createdAt])
+  @@index([createdAt, field])
+}
+
+model IssueDropdownValue {
+  id        String   @id @default(cuid())
+  type      String   // "ISSUE_TYPE", "ISSUE_STATUS", "ACTUAL_ISSUE"
+  value     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  issuesAsType   Issue[] @relation("IssueTypeRelation")
+  issuesAsStatus Issue[] @relation("IssueStatusRelation")
+  issuesAsActual Issue[] @relation("ActualIssueRelation")
+}
+
+model Issue {
+  id            String   @id @default(cuid())
+  issueId       String   @unique // e.g., ISS-0001
+  name          String
+  emailId       String?
+  mobileNumber  String
+  issueTypeId   String
+  leadOwnerId   String?  // The Technical Executive assigned to it
+  issueStatusId String?
+  actualIssueId String?
+  remark        String?
+  creatorId     String   // The Sales/Recovery Executive who created it
+  status        String   @default("OPEN") // "OPEN" or "CLOSED"
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  issueType     IssueDropdownValue  @relation("IssueTypeRelation", fields: [issueTypeId], references: [id])
+  issueStatus   IssueDropdownValue? @relation("IssueStatusRelation", fields: [issueStatusId], references: [id])
+  actualIssue   IssueDropdownValue? @relation("ActualIssueRelation", fields: [actualIssueId], references: [id])
+  
+  creator       User     @relation("IssueCreator", fields: [creatorId], references: [id])
+  leadOwner     User?    @relation("IssueOwner", fields: [leadOwnerId], references: [id])
+  
+  histories     IssueHistory[]
+  @@index([leadOwnerId, status])
+  @@index([creatorId, createdAt])
+}
+
+model IssueHistory {
+  id        String   @id @default(cuid())
+  issueId   String
+  userId    String
+  action    String   // "CREATED", "ASSIGNED", "STATUS_CHANGED", "ACTUAL_ISSUE_CHANGED", "REMARK_UPDATED", "CLOSED"
+  fieldName String?  // Optional: name of the field that was changed
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model IncentiveConfiguration {
+  id                               Int      @id @default(1)
+  
+  webinarTarget                    Int      @default(6)
+  webinarWeightage                 Float    @default(15)
+  webinarMaximumCap                Float    @default(15)
+  
+  callingTarget                    Int      @default(5200)
+  callingWeightage                 Float    @default(15)
+  callingMaximumCap                Float    @default(15)
+  
+  revenueTarget                    Float    @default(160000)
+  revenueWeightage                 Float    @default(70)
+  revenueHasCap                    Boolean  @default(false)
+  
+  pipThreshold                     Float    @default(75)
+  
+  noIncentiveStart                 Float    @default(75.01)
+  noIncentiveEnd                   Float    @default(94.99)
+  
+  fixedIncentiveStart              Float    @default(95)
+  fixedIncentiveEnd                Float    @default(100)
+  fixedIncentiveAmount             Float    @default(500)
+  
+  additionalIncentiveStart         Float    @default(100)
+  additionalIncentivePerPercentage Float    @default(300)
+
+  updatedAt                        DateTime @updatedAt
+}
+model WebinarAttendanceUpload {
+  id           String   @id @default(cuid())
+  webinarId    String
+  webinarDay   String
+  uploadedFile String
+  uploadedBy   String
+  status       String   @default("COMPLETED")
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  records      WebinarAttendance[]
+}
+
+model WebinarAttendance {
+  id         String   @id @default(cuid())
+  uploadId   String
+  webinarId  String
+  webinarDay String
+  email      String
+  
+  upload     WebinarAttendanceUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  @@index([webinarId, email])
+  @@index([email])
+}
+
+model DropdownConfiguration {
+  id         String   @id @default(cuid())
+  sheetName  String
+  columnName String
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  values     DropdownValue[]
+
+  @@unique([sheetName, columnName])
+}
+
+model DropdownValue {
+  id         String   @id @default(cuid())
+  configId   String
+  value      String
+  isActive   Boolean  @default(true)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  config     DropdownConfiguration @relation(fields: [configId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------
+// Department & Workflow Management System Layer
+// -------------------------------------------------
+
+model OrgDepartment {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  description   String?
+  icon          String?  @default("Building2")
+  color         String?  @default("#3b82f6")
+  managerId     String?
+  
+  // Mapping rule to existing users (e.g. mainDepartment="Sales Department")
+  userMatchRule String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  teams         OrgTeam[]
+  modules       OrgModule[]
+  manager       User?    @relation("DepartmentManager", fields: [managerId], references: [id])
+}
+
+model OrgTeam {
+  id            String   @id @default(cuid())
+  departmentId  String
+  name          String
+  leaderId      String?
+  
+  // Mapping rule to existing users (e.g. department="SALES")
+  userMatchRule String?
+
+  // Analytics Permissions
+  canViewPerformance Boolean @default(false)
+  canViewReports     Boolean @default(false)
+  canViewIncentives  Boolean @default(false)
+
+  createdAt     DateTime @default(now())
+  
+  department    OrgDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  leader        User?         @relation("TeamLeader", fields: [leaderId], references: [id])
+  permittedModules OrgModule[]
+}
+
+model OrgModule {
+  id            String   @id @default(cuid())
+  departmentId  String
+  name          String
+  description   String?
+  type          String   @default("SHEET") // "SHEET", "CALLING_SYSTEM", "WHATSAPP", "WEBINAR", "QUEUE"
+
+  urlPath       String?  // /part-payment etc
+  icon          String?
+  ownerId       String?
+  
+  // JSON structure defining the custom columns for dynamic modules
+  columnsConfig String?
+  
+  createdAt     DateTime @default(now())
+  
+  department    OrgDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  owner         User?         @relation("ModuleOwner", fields: [ownerId], references: [id])
+  
+  outgoingConnections OrgConnection[] @relation("SourceModule")
+  incomingConnections OrgConnection[] @relation("DestModule")
+
+  allowedTeams  OrgTeam[]
+}
+
+model OrgConnection {
+  id            String   @id @default(cuid())
+  sourceId      String
+  destId        String
+  direction     String   @default("ONE_WAY") // "ONE_WAY", "TWO_WAY"
+  syncEnabled   Boolean  @default(false)
+  
+  sourceModule  OrgModule @relation("SourceModule", fields: [sourceId], references: [id], onDelete: Cascade)
+  destModule    OrgModule @relation("DestModule", fields: [destId], references: [id], onDelete: Cascade)
+  
+  mappings      OrgFieldMapping[]
+}
+
+model OrgFieldMapping {
+  id            String   @id @default(cuid())
+  connectionId  String
+  sourceField   String
+  destField     String
+  
+  connection    OrgConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------
+// Social Media Content Management System Layer
+// -------------------------------------------------
+
+model ContentRecord {
+  id              String    @id @default(cuid())
+  uniqueId        String    @unique // e.g., VS-001
+  topic           String
+  platform        String    // YouTube, Instagram, etc.
+  format          String    // Long Video, Short, etc.
+  status          String    @default("Pending")
+  doneDate        DateTime?
+  remark          String?
+  channel         String    // VS Channel, LVS Malayalam, etc.
+  videoLink       String?
+  thumbnail       String?
+  thumbnailCount  String?
+  graphicsCount   String?
+  thumbnailDoneDate DateTime?
+  sendTo          String?
+  
+  // Approval
+  approvalStatus  String    @default("Pending") // Pending, Approved, Rejected
+  approvalDate    DateTime?
+  approvedById    String?
+  approver        User?     @relation("ContentApprover", fields: [approvedById], references: [id])
+  
+  // Posting
+  postOnDate      DateTime?
+  postedById      String?
+  postedBy        User?     @relation("ContentPoster", fields: [postedById], references: [id])
+  postedOnPlatform String?
+  
+  // Uploading
+  uploadingStatus String    @default("Not Started")
+  uploadingDate   DateTime?
+  scheduleVideo   Boolean   @default(false)
+  uploadingTime   String?
+  storyStatus     String?   @default("Pending")
+
+  // Editor Relation
+  editorId        String?
+  editor          User?     @relation("ContentEditor", fields: [editorId], references: [id])
+  
+  // Graphic Designer Relation
+  graphicDesignerId String?
+  graphicDesigner   User?   @relation("ContentGraphicDesigner", fields: [graphicDesignerId], references: [id])
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  @@index([channel, createdAt])
+  @@index([editorId])
+  @@index([graphicDesignerId])
+}
+
+model TaskRecord {
+  id                 String    @id @default(cuid())
+  uniqueId           String    @unique // e.g. TSK-0001
+  departmentName     String    // HR, Content, E-com
+  assigningDate      String?
+  requirementDate    String?
+  platform           String?
+  topic              String?
+  requirementPurpose String?
+  referenceFile      String?
+  format             String?
+  size               String?
+  videoLink          String?
+  graphicsCount      String?
+  remark             String?
+  assignedDepartment String?   // Editing Team, Graphics Team
+  assignedToId       String?
+  assignedTo         User?     @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  status             String    @default("Pending") // Represents the "submit" status
+  
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+model SocialMediaUserTarget {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team            String   // "Editing Team", "Graphics Team", "Posting Team"
+  
+  // For Editing Team: Videos
+  weeklyVideos    Int      @default(0)
+  monthlyVideos   Int      @default(0)
+  
+  // For Graphics Team: Graphics Quantity
+  weeklyGraphics  Int      @default(0)
+  monthlyGraphics Int      @default(0)
+  
+  // For Posting Team: Posts & Stories
+  weeklyPosts     Int      @default(0)
+  monthlyPosts    Int      @default(0)
+  weeklyStories   Int      @default(0)
+  monthlyStories  Int      @default(0)
+
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+}
+
+model AdCreativeRecord {
+  id            String    @id @default(cuid())
+  creativeId    String?
+  mediaType     String    @default("Video") // "Video", "Graphics"
+  videoName     String
+  forTarget     String    @default("Vastu Shikhar") // "Vastu Shikhar", "Vastu Wheels", "Ai telemate", "Consultancy"
+  editorId      String?
+  editor        User?     @relation("AdCreativeEditor", fields: [editorId], references: [id])
+  editorName    String?
+  videoLink     String?
+  status        String    @default("pending") // "pending", "Inprogres", "Complete"
+  completedDate String?   // Date auto filled when status becomes Complete
+  remark        String?
+  approval      String    @default("Pending") // "Pending", "Approved", "Rejected"
+  useStatus     String    @default("pending") // "pending", "utilize"
+  utilizeDate   String?   // Date auto filled when useStatus becomes utilize
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model WhatsAppTemplate {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  message   String
+  imageUrl  String?
+  videoUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserShift {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation("UserShifts", fields: [userId], references: [id], onDelete: Cascade)
+  date               String   // YYYY-MM-DD
+  startTime          DateTime @default(now())
+  endTime            DateTime?
+  totalActiveSeconds Int      @default(0)
+  breaks             ShiftBreak[]
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([userId, date])
+}
+
+model ShiftBreak {
+  id          String    @id @default(cuid())
+  shiftId     String
+  shift       UserShift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  type        String    // "Tea Break", "Lunch Break"
+  startTime   DateTime  @default(now())
+  endTime     DateTime?
+  durationSec Int       @default(0)
+}
+
+
+
+model SocialMediaChannel {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  platforms String   // comma separated or JSON string
+  purpose   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

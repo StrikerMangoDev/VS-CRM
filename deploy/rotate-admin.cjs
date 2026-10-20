@@ -1,0 +1,25 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const { PrismaClient } = require('@prisma/client')
+const { PrismaPg } = require('@prisma/adapter-pg')
+const { Pool } = require('pg')
+const bcrypt = require('bcryptjs')
+let pool, db
+async function main() {
+  const input = JSON.parse(fs.readFileSync(0, 'utf8'))
+  assert.match(input.email, /^[^\s@]+@[^\s@]+\.[^\s@]+$/)
+  assert.ok(typeof input.password === 'string' && Buffer.byteLength(input.password) >= 24 && Buffer.byteLength(input.password) <= 72)
+  pool = new Pool({ connectionString: process.env.DATABASE_URL })
+  db = new PrismaClient({ adapter: new PrismaPg(pool) })
+  const hash = await bcrypt.hash(input.password, 12)
+  await db.$transaction(async tx => {
+    const user = await tx.user.findUniqueOrThrow({ where: { email: input.email.trim().toLowerCase() } })
+    assert.equal(user.role, 'ADMIN')
+    assert.equal(user.isActive, true)
+    await tx.user.update({ where: { id: user.id }, data: { password: hash, resetToken: null, resetTokenExpiry: null } })
+    await tx.session.deleteMany({ where: { userId: user.id } })
+  })
+  console.log('Administrator password rotated and existing administrator sessions revoked')
+}
+main().catch(() => { console.error('Administrator rotation failed'); process.exitCode = 1 })
+  .finally(async () => { await db?.$disconnect(); await pool?.end() })
