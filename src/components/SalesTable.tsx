@@ -1,9 +1,10 @@
 'use client'
-import { useLeadPage,usePageNumber,dateBounds,followBounds } from '@/hooks/use-lead-page';
+import BodyPortal from '@/components/BodyPortal'
+import { useLeadPage,usePageNumber,dateBounds,followBounds,allMatchingLeads } from '@/hooks/use-lead-page';
 import type { LeadPage,LeadQuery } from '@/lib/lead-query';
 import toast from 'react-hot-toast';
 
-import { useState,useEffect } from 'react';
+import { useState,useEffect,useCallback,useRef } from 'react';
 import { removeLeadFromSheetAction,updateLeadStatusAction } from '@/app/actions/lead';
 import { initiateCallAction,checkCallStatusAction,saveCallLogAction } from '@/app/actions/call';
 import AddColumnModal from '@/components/AddColumnModal';
@@ -16,7 +17,7 @@ import { getWhatsAppTemplatesAction,updateLeadWhatsAppTemplateAction } from '@/a
 import { transferLeadWebinarAction } from '@/app/actions/lead';
 import { useConfirm } from '@/providers/ConfirmProvider';
 
-export default function SalesTable({ initialPage, webinarFilter, isAdmin = false, updaterDepartment = '', customColumns = [], sheetName = 'SALES', webinars = [], executives = [], isClosed = false, userRole = '' }: { initialPage: LeadPage, webinarFilter?: string | null, isAdmin?: boolean, updaterDepartment?: string, customColumns?: import('@prisma/client').CustomColumn[], sheetName?: string, webinars?: import('@prisma/client').WebinarMaster[], executives?: import('@/lib/view-types').Person[], isClosed?: boolean, userRole?: string }) {
+export default function SalesTable({ initialPage, webinarFilter, isAdmin = false, updaterDepartment = '', customColumns = [], sheetName = 'SALES', webinars = [], executives = [], isClosed = false, userRole = '', startCallingRequest = 0 }: { initialPage: LeadPage, webinarFilter?: string | null, isAdmin?: boolean, updaterDepartment?: string, customColumns?: import('@prisma/client').CustomColumn[], sheetName?: string, webinars?: import('@prisma/client').WebinarMaster[], executives?: import('@/lib/view-types').Person[], isClosed?: boolean, userRole?: string, startCallingRequest?: number }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterLogStatus, setFilterLogStatus] = useState(sheetName === 'RECOVERY' ? 'Fresh Log' : '')
   const [filterCallStatus, setFilterCallStatus] = useState<string>('all')
@@ -64,6 +65,24 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
   const [requestedPage,setRequestedPage] = usePageNumber(JSON.stringify({...queryFilters,size:rowsPerPage}))
   const pageData=useLeadPage(initialPage,{...queryFilters,page:requestedPage,size:rowsPerPage})
   const localLeads=pageData.rows, setLocalLeads=pageData.setRows
+  const callingQueryKey=JSON.stringify(queryFilters)
+  const openingCalling=useRef(false)
+  const handledCallingRequest=useRef(0)
+  const openCallingSession=useCallback(async()=>{
+    if(openingCalling.current)return
+    openingCalling.current=true
+    try{
+      const queue=await allMatchingLeads(JSON.parse(callingQueryKey))
+      if(!queue.length){toast.error('No leads in queue.');return}
+      setPowerDialerLeads(queue);setPowerDialerIndex(0);setIsPowerDialerMode(true)
+    }catch{toast.error('Unable to load calling queue. Please try again.')}
+    finally{openingCalling.current=false}
+  },[callingQueryKey])
+  useEffect(()=>{
+    if(!startCallingRequest||handledCallingRequest.current===startCallingRequest)return
+    handledCallingRequest.current=startCallingRequest
+    void openCallingSession()
+  },[startCallingRequest,openCallingSession])
   const currentPage=Math.min(requestedPage,Math.max(1,Math.ceil(pageData.total/rowsPerPage)))
   const setCurrentPage=(next:number|((page:number)=>number))=>setRequestedPage(typeof next==='function'?next(currentPage):next)
 
@@ -82,10 +101,10 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
     if (!isCallConnected || callDuration === 0) return;
     
     if (callDuration % 5 === 0) {
-      checkCallStatusAction().then(status => {
-        if (status.active) {
+      checkCallStatusAction(callRefId || undefined).then(status => {
+        if (status.active === true) {
           setHasCallBeenLive(true);
-        } else {
+        } else if (status.active === false) {
           // Always save log if it disconnected, even if duration was short
           setIsCallConnected(false);
           setCallStatusMessage('Call Disconnected');
@@ -96,7 +115,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
               duration: callDuration
             }).then(result => {
               if (!result.success || !result.callRecord) {toast.error(result.error || 'Failed to save call log');return}
-              const newStatus = callDuration > 0 ? 'CALL_CONNECTED' : 'CALL_NOT_CONNECTED';
+              const newStatus = result.callStatus;
               const newCallRecord = result.callRecord;
               setLocalLeads((prev) => prev.map((l) => {
                 if (l.id === activeCallLead.id) {
@@ -104,7 +123,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                     ...l,
                     callStatus: newStatus,
                     updatedAt: new Date(),
-                    callRecords: [newCallRecord, ...(l.callRecords || [])]
+                    callRecords: [newCallRecord, ...(l.callRecords || []).filter(record => record.id !== newCallRecord.id)]
                   };
                 }
                 return l;
@@ -115,7 +134,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                     ...l,
                     callStatus: newStatus,
                     updatedAt: new Date(),
-                    callRecords: [newCallRecord, ...(l.callRecords || [])]
+                    callRecords: [newCallRecord, ...(l.callRecords || []).filter(record => record.id !== newCallRecord.id)]
                   };
                 }
                 return l;
@@ -342,7 +361,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
     }
   }
 
-  const editingLead = localLeads.find(l => l.id === editingLeadId)
+  const editingLead = localLeads.find(l => l.id === editingLeadId) || powerDialerLeads.find(l => l.id === editingLeadId)
 
   // Extract unique states for dropdown
   const states = Array.from(new Set(localLeads.map(l => l.state).filter(Boolean))) as string[]
@@ -365,11 +384,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Start Calling Button moved here */}
             <button
-              onClick={() => {
-                setIsPowerDialerMode(true);
-                setPowerDialerIndex(0);
-                setPowerDialerLeads(currentLeads);
-              }}
+              onClick={openCallingSession}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: '#10b981', color: '#fff', borderRadius: '6px', fontWeight: 600, border: 'none', cursor: 'pointer', fontSize: '0.85rem' }}
             >
               <PhoneCall size={14} /> Start Calling
@@ -716,7 +731,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                   initiateCallAction(lead.id).then(res => {
                     if (res.error) setCallStatusMessage(res.error);
                     else { 
-                      setCallRefId(res.ref_id || `local_${Date.now()}`);
+                      setCallRefId(res.ref_id || null);
                       setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
                       setIsCallConnected(true);
                     }
@@ -815,7 +830,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
       )}
 
       {editingLeadId && editingLead && (
-        <EditLeadModal
+        <BodyPortal><EditLeadModal
           lead={editingLead}
           onClose={() => setEditingLeadId(null)}
           webinars={webinars}
@@ -824,14 +839,14 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
           isAdmin={isAdmin}
           updaterDepartment={updaterDepartment}
           onSaveSuccess={handleSaveSuccess}
-        />
+        /></BodyPortal>
       )}
 
       {viewingHistoryLead && (
-        <LeadHistoryModal 
+        <BodyPortal><LeadHistoryModal
           lead={viewingHistoryLead} 
           onClose={() => setViewingHistoryLead(null)} 
-        />
+        /></BodyPortal>
       )}
 
       {transferModalLead && (
@@ -1018,7 +1033,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
       )}
 
       {activeCallLead && (
-        <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 99999, pointerEvents: 'none', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+        <BodyPortal><div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 99999, pointerEvents: 'none', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
           <div className="card" style={{ padding: '24px', borderRadius: '16px', background: 'var(--table-header-bg)', border: '1px solid var(--card-border)', width: '320px', textAlign: 'center', pointerEvents: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
             {isCalling ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
@@ -1049,7 +1064,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
               </div>
             )}
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {issueLead && (
@@ -1093,10 +1108,10 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
       )}
 
       {isPowerDialerMode && powerDialerLeads[powerDialerIndex] && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--background)', zIndex: 1000, display: 'flex', flexDirection: 'column', padding: '24px', overflow: 'hidden' }}>
+        <BodyPortal><div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--background)', zIndex: 1000, display: 'flex', flexDirection: 'column', padding: '24px', overflow: 'hidden' }}>
           <div style={{ maxWidth: '800px', width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: '1.5rem' }}>Calling Session ({powerDialerIndex + 1} / {currentLeads.length})</h2>
+              <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: '1.5rem' }}>Calling Session ({powerDialerIndex + 1} / {powerDialerLeads.length})</h2>
               <button 
                 onClick={() => setIsPowerDialerMode(false)} 
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, transition: 'background 0.2s' }}
@@ -1133,7 +1148,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                         initiateCallAction(lead.id).then(res => {
                           if (res.error) setCallStatusMessage(res.error);
                           else {
-                            setCallRefId(res.ref_id || `local_${Date.now()}`);
+                            setCallRefId(res.ref_id || null);
                             setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
                             setIsCallConnected(true);
                           }
@@ -1237,16 +1252,16 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                 Previous Lead
               </button>
               <button 
-                onClick={() => setPowerDialerIndex(prev => Math.min(currentLeads.length - 1, prev + 1))}
-                disabled={powerDialerIndex === currentLeads.length - 1}
-                style={{ padding: '12px 24px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: powerDialerIndex === currentLeads.length - 1 ? 'not-allowed' : 'pointer', opacity: powerDialerIndex === currentLeads.length - 1 ? 0.5 : 1 }}
+                onClick={() => setPowerDialerIndex(prev => Math.min(powerDialerLeads.length - 1, prev + 1))}
+                disabled={powerDialerIndex === powerDialerLeads.length - 1}
+                style={{ padding: '12px 24px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: powerDialerIndex === powerDialerLeads.length - 1 ? 'not-allowed' : 'pointer', opacity: powerDialerIndex === powerDialerLeads.length - 1 ? 0.5 : 1 }}
               >
                 Next Lead
               </button>
             </div>
 
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </div>
   )

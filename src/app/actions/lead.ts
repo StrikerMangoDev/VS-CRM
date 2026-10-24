@@ -9,6 +9,7 @@ import Papa from 'papaparse'
 import { calculateLeadStatus } from '@/utils/leadStatus'
 import { prisma,withLeadTransaction } from '@/lib/prisma'
 import { createHash } from 'node:crypto'
+import { refreshPendingCalls } from '@/lib/smartflo'
 
 
 async function generateNextPartPaymentId() {
@@ -86,14 +87,15 @@ export async function getCallLogsAction(leadId: string) {
   await requireLeadAccess(leadId);
 
   try {
-    const logs = await prisma.callRecord.findMany({
+    const readLogs = () => prisma.callRecord.findMany({
       where: { leadId },
       include: {
         user: { select: { name: true, role: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
-    return logs;
+    const logs = await readLogs()
+    return await refreshPendingCalls(logs) ? await readLogs() : logs;
   } catch {
     return [];
   }

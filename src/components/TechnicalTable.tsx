@@ -1,4 +1,5 @@
 'use client'
+import BodyPortal from '@/components/BodyPortal'
 import { useLeadPage,usePageNumber } from '@/hooks/use-lead-page'
 import type { LeadPage } from '@/lib/lead-query'
 
@@ -33,10 +34,10 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
     if (!isCallConnected || callDuration === 0) return;
     
     if (callDuration % 5 === 0) {
-      checkCallStatusAction().then(status => {
-        if (status.active) {
+      checkCallStatusAction(callRefId || undefined).then(status => {
+        if (status.active === true) {
           setHasCallBeenLive(true);
-        } else {
+        } else if (status.active === false) {
           setHasCallBeenLive(currentHasLive => {
             if (currentHasLive || callDuration > 15) {
               setIsCallConnected(false);
@@ -433,7 +434,7 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
       )}
       
       {activeCallLead && (
-        <div style={{
+        <BodyPortal><div style={{
           position: 'fixed' as const, top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -515,7 +516,7 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
               </div>
             ) : null}
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </div>
   )

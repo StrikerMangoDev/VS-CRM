@@ -1,4 +1,5 @@
 'use client';
+import BodyPortal from '@/components/BodyPortal'
 
 import { useState,useEffect,useCallback } from 'react';
 import { Plus,X,UserCheck,Edit2,PhoneCall,PhoneOff } from 'lucide-react';
@@ -585,7 +586,7 @@ export default function IssueTable({ isTechnicalQueue = false, userRole, userId 
       )}
 
       {activeCallIssue && (
-        <div style={{
+        <BodyPortal><div style={{
           position: 'fixed' as const, top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -660,7 +661,7 @@ export default function IssueTable({ isTechnicalQueue = false, userRole, userId 
               </div>
             ) : null}
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 'use client'
+import BodyPortal from '@/components/BodyPortal'
 import { useInfinitePage } from '@/hooks/use-lead-page'
 import { getCallPage,getCallLeadQueue } from '@/app/actions/lead-query'
 import { getLeadHistoryAction,getCallLogsAction } from '@/app/actions/lead'
@@ -67,10 +68,10 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
     
     // Poll API every 5 seconds
     if (callDuration % 5 === 0) {
-      checkCallStatusAction().then(status => {
-        if (status.active) {
+      checkCallStatusAction(callRefId || undefined).then(status => {
+        if (status.active === true) {
           setHasCallBeenLive(true);
-        } else {
+        } else if (status.active === false) {
           // If it's not active, maybe it disconnected.
           if (hasCallBeenLive || callDuration > 20) {
             setIsCallConnected(false);
@@ -122,7 +123,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
         setIsCalling(false)
       } else {
         toast.success('Call initiated')
-        setCallRefId(res.ref_id || `local_${Date.now()}`);
+        setCallRefId(res.ref_id || null);
         setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
         setIsCallConnected(true);
       }
@@ -447,7 +448,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
       </div>
 
       {showModal && (
-        <div style={{
+        <BodyPortal><div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)',
           zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
@@ -590,7 +591,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {historyLead && (
@@ -748,7 +749,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
       )}
 
       {isPowerDialerMode && uniqueLeadsForDialer[powerDialerIndex] && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--background)', zIndex: 1000, display: 'flex', flexDirection: 'column', padding: '24px', overflow: 'hidden' }}>
+        <BodyPortal><div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--background)', zIndex: 1000, display: 'flex', flexDirection: 'column', padding: '24px', overflow: 'hidden' }}>
           <div style={{ maxWidth: '800px', width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: '1.5rem' }}>Calling Session ({powerDialerIndex + 1} / {uniqueLeadsForDialer.length})</h2>
@@ -788,7 +789,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
                           const res = await createExtraDialerLeadAndCallAction(lead.mobileNumber, lead.remark1 || '', lead.remark2 || '', lead.callStatus || 'UNTOUCHED', lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toISOString() : '', true);
                           if (res.error) setCallStatusMessage(res.error);
                           else {
-                            setCallRefId(res.ref_id || `local_${Date.now()}`);
+                            setCallRefId(res.ref_id || null);
                             setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
                             setIsCallConnected(true);
                           }
@@ -924,7 +925,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </div>
   )

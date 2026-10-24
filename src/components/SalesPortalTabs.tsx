@@ -39,6 +39,7 @@ export default function SalesPortalTabs({
 }) {
   const [activeTab, setActiveTab] = useState<'webinars' | 'table' | 'issues' | 'dashboard'>(isClosed ? 'table' : 'webinars')
   const [activeWebinarFilter, setActiveWebinarFilter] = useState<string | null>(null)
+  const [startCallingRequest,setStartCallingRequest]=useState(0)
   const [technicalTab, setTechnicalTab] = useState<'daily_paid' | 'welcome_call' | 'access'>('daily_paid')
 
   const allWebinars = webinarStats.map(stat=>stat.webinar)
@@ -49,6 +50,7 @@ export default function SalesPortalTabs({
   const filteredLeads = allLeadsForDashboard
 
   const handleStartCalling = (webinar: string) => {
+    setStartCallingRequest(request=>request+1)
     setActiveWebinarFilter(webinar)
     setActiveTab('table')
   }
@@ -79,7 +81,7 @@ export default function SalesPortalTabs({
           {!isClosed && (
             <div style={{ display: 'flex', background: 'var(--card-bg)', padding: '4px', borderRadius: '8px', border: '1px solid var(--card-border)' }}>
               <button
-                onClick={() => setActiveTab('webinars')}
+                onClick={() => {setStartCallingRequest(0);setActiveTab('webinars')}}
             style={{
               display: 'flex', alignItems: 'center', gap: '8px',
               padding: '8px 16px', borderRadius: '6px', fontSize: '0.875rem', fontWeight: 500,
@@ -92,7 +94,7 @@ export default function SalesPortalTabs({
             Webinars
           </button>
           <button
-            onClick={() => { setActiveTab('table'); setActiveWebinarFilter(null); }}
+            onClick={() => { setStartCallingRequest(0);setActiveTab('table'); setActiveWebinarFilter(null); }}
             style={{
               display: 'flex', alignItems: 'center', gap: '8px',
               padding: '8px 16px', borderRadius: '6px', fontSize: '0.875rem', fontWeight: 500,
@@ -268,7 +270,7 @@ export default function SalesPortalTabs({
           {portalType === 'TECHNICAL' ? (
             <TechnicalTable key={technicalTab+(activeWebinarFilter||'')} initialPage={initialPage} webinarFilter={activeWebinarFilter} tabType={technicalTab} />
           ) : (
-            <SalesTable initialPage={initialPage} webinarFilter={activeWebinarFilter} isAdmin={isAdmin} updaterDepartment={portalType} customColumns={customColumns} sheetName={portalType} webinars={webinars} executives={executives} isClosed={isClosed} userRole={userRole} />
+            <SalesTable startCallingRequest={startCallingRequest} initialPage={initialPage} webinarFilter={activeWebinarFilter} isAdmin={isAdmin} updaterDepartment={portalType} customColumns={customColumns} sheetName={portalType} webinars={webinars} executives={executives} isClosed={isClosed} userRole={userRole} />
           )}
         </div>
       )}

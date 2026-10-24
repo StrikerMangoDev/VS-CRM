@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from './prisma'
 import { requireSales,requireUser } from './auth'
 import { leadInclude } from './lead-query'
+import { refreshPendingCalls } from './smartflo'
 export type CallQuery = {mode:'DIALER'|'HISTORY';page?:number;size?:number;search?:string;status?:string;leadStatus?:string;follow?:string;lastCall?:string;today?:string;start?:string;end?:string;caller?:string}
 const include={lead:true,user:{select:{id:true,name:true}}} satisfies Prisma.CallRecordInclude
 export type CallRow=Prisma.CallRecordGetPayload<{include:typeof include}>
@@ -33,7 +34,7 @@ async function filters(q:CallQuery){
 }
 export async function queryCallPage(q:CallQuery):Promise<CallPage>{
   const where=await filters(q),size=Math.max(1,Math.min(1000,Math.floor(q.size||50)))
-  return prisma.$transaction(async tx=>{
+  const result=await prisma.$transaction(async tx=>{
     const total=await tx.callRecord.count({where}),page=Math.min(Math.max(1,Math.floor(q.page||1)),Math.max(1,Math.ceil(total/size)))
     const rows=await tx.callRecord.findMany({where,include,orderBy:[{createdAt:'desc'},{id:'asc'}],skip:(page-1)*size,take:size})
     const sums=await tx.callRecord.aggregate({where,_sum:{duration:true}})
@@ -41,6 +42,13 @@ export async function queryCallPage(q:CallQuery):Promise<CallPage>{
     const callers=await tx.user.findMany({where:{callRecords:{some:callerScope}},select:{name:true},orderBy:{name:'asc'}})
     return{rows,page,size,total,duration:sums._sum.duration||0,callers:[...new Set(callers.map(u=>u.name))],revision:new Date().toISOString()}
   },{isolationLevel:'RepeatableRead'})
+  if(await refreshPendingCalls(result.rows)){
+    const rows=await prisma.callRecord.findMany({where:{id:{in:result.rows.map(row=>row.id)}},include})
+    const byId=new Map(rows.map(row=>[row.id,row]))
+    const sums=await prisma.callRecord.aggregate({where,_sum:{duration:true}})
+    return {...result,rows:result.rows.map(row=>byId.get(row.id)||row),duration:sums._sum.duration||0}
+  }
+  return result
 }
 export async function queryCallLeadQueue(q:CallQuery){
   const where=await filters({...q,mode:'DIALER'})

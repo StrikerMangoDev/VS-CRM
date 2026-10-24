@@ -1,4 +1,5 @@
 'use client'
+import BodyPortal from '@/components/BodyPortal'
 import {getLeadBulkOptions} from '@/app/actions/lead-query'
 import { useLeadPage,usePageNumber,allMatchingLeads,dateBounds } from '@/hooks/use-lead-page'
 import type { LeadPage,LeadQuery,LeadBulkOption } from '@/lib/lead-query'
@@ -122,10 +123,10 @@ function MasterLeadTable({
     
     // Poll API every 5 seconds
     if (callDuration % 5 === 0) {
-      checkCallStatusAction().then(status => {
-        if (status.active) {
+      checkCallStatusAction(callRefId || undefined).then(status => {
+        if (status.active === true) {
           setHasCallBeenLive(true);
-        } else {
+        } else if (status.active === false) {
           // If it's not active, maybe it disconnected.
           // To avoid false negatives early in the call, we wait until it has been live or 15 seconds have passed.
           if (hasCallBeenLive || callDuration > 15) {
@@ -765,7 +766,7 @@ function MasterLeadTable({
                         initiateCallAction(lead.id).then(res => {
                           if (res.error) setCallStatusMessage(res.error);
                           else { 
-                            setCallRefId(res.ref_id || `local_${Date.now()}`);
+                            setCallRefId(res.ref_id || null);
                             setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
                             setIsCallConnected(true);
                           }
@@ -1404,7 +1405,7 @@ function MasterLeadTable({
         />
       )}
       {activeCallLead && (
-        <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 99999, pointerEvents: 'none', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+        <BodyPortal><div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 99999, pointerEvents: 'none', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
           <div className="card" style={{ padding: '24px', borderRadius: '16px', background: 'var(--table-header-bg)', border: '1px solid var(--card-border)', width: '320px', textAlign: 'center', pointerEvents: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
             {isCalling ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
@@ -1446,7 +1447,7 @@ function MasterLeadTable({
               </div>
             ) : null}
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {issueLead && (
