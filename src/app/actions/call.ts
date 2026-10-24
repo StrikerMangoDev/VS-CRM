@@ -39,7 +39,6 @@ export async function checkCallStatusAction(refId?: string) {
       const current = await refreshStoredCall(call)
       if (current.complete) return { active: false, duration: current.call.duration }
       // An absent live-call row can mean ringing or reporting lag, not a hangup.
-      await smartfloLiveCalls(refId)
       return { active: true }
     } catch { return { active: true, error: 'Call status is temporarily unavailable. The phone call has not been ended.' } }
   }

@@ -4,10 +4,15 @@ import { prisma } from './prisma'
 type ProviderRecord = Record<string, unknown>
 const callerIds = ['917969081999', '917969081998', '917969081997', '917969081996', '917969081995', '917969081994', '917969081993', '917969081992', '917969081991']
 export const pendingCallStatuses = ['INITIATING', 'RINGING', 'ACTIVE', 'UNKNOWN']
+const providerQueue = globalThis as unknown as { smartfloRequestTurn?: Promise<void> }
 
 async function request(path: string, body?: ProviderRecord): Promise<unknown> {
   const token = process.env.SMARTFLO_API_TOKEN
   if (!token) throw new Error('Smartflo API integration is not configured. Missing SMARTFLO_API_TOKEN.')
+  // Smartflo applies an account-wide requests-per-second limit; stagger users' polls.
+  const turn = providerQueue.smartfloRequestTurn ?? Promise.resolve()
+  providerQueue.smartfloRequestTurn = turn.then(() => new Promise<void>(resolve => setTimeout(resolve, 500)))
+  await turn
   const response = await fetch('https://api-smartflo.tatateleservices.com/v1/' + path, {
     method: body ? 'POST' : 'GET',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

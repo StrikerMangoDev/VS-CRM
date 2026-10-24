@@ -24,7 +24,7 @@ before(async()=>{
  process.env.SMARTFLO_API_TOKEN='isolated-smartflo-test-token'
  global.fetch=async(input,options={})=>{
   const url=new URL(String(input));assert.equal(url.origin,'https://api-smartflo.tatateleservices.com','Unexpected network access')
-  requests.push({url,body:options.body?JSON.parse(options.body):null})
+  requests.push({url,body:options.body?JSON.parse(options.body):null,startedAt:Date.now()})
   if(networkError)throw new TypeError('Simulated network failure')
   if(providerError)return new Response(JSON.stringify({success:false,message:'Simulated provider failure'}),{status:400})
   if(url.pathname.endsWith('/click_to_call'))return Response.json({success:true,ref_id:nextRef})
@@ -49,6 +49,14 @@ test('accepted calls are durable before polling, use async initiation, and retai
  assert.equal(request.body.async,1);assert.equal(request.body.custom_identifier.crmcall,call.id)
  assert.equal(request.body.destination_number,'09999999999')
  assert.equal((await db.lead.findUnique({where:{id:value.lead.id}})).callStatus,'UNTOUCHED')
+})
+
+test('simultaneous provider reads are paced instead of bursting the account limit',async()=>{
+ const smartflo=load('src/lib/smartflo.ts')
+ await Promise.all([smartflo.smartfloLiveCalls(),smartflo.smartfloLiveCalls(),smartflo.smartfloLiveCalls()])
+ assert.equal(requests.length,3)
+ assert.ok(requests[1].startedAt-requests[0].startedAt>=450)
+ assert.ok(requests[2].startedAt-requests[1].startedAt>=450)
 })
 test('empty live-call results and delayed CDR never fabricate a disconnection',async()=>{
  const value=await start()
