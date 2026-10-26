@@ -51,6 +51,8 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
   const [isCallConnected, setIsCallConnected] = useState(false)
   const [hasCallBeenLive, setHasCallBeenLive] = useState(false)
   const [callRefId, setCallRefId] = useState<string | null>(null)
+  const latestCallRef = React.useRef<string | null>(null)
+  React.useEffect(() => { latestCallRef.current = callRefId }, [callRefId])
   
   // Call Tracker Logic
   React.useEffect(() => {
@@ -69,6 +71,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
     // Poll API every 5 seconds
     if (callDuration % 5 === 0) {
       checkCallStatusAction(callRefId || undefined).then(status => {
+        if (latestCallRef.current !== callRefId) return;
         if (status.active === true) {
           setHasCallBeenLive(true);
         } else if (status.active === false) {
@@ -86,6 +89,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
               }).catch(() => {});
             }
             setTimeout(() => {
+              if (latestCallRef.current !== callRefId) return;
               setIsCalling(false);
               setCallDuration(0);
               setCallRefId(null);
@@ -720,6 +724,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
                     }).then(() => router.refresh()).catch(() => {});
                   }
                   setTimeout(() => {
+                    if (latestCallRef.current !== callRefId) return;
                     setIsCalling(false);
                     setCallDuration(0);
                     setCallRefId(null);

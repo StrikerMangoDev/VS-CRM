@@ -55,6 +55,8 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
   const [isCallConnected, setIsCallConnected] = useState(false)
   const [hasCallBeenLive, setHasCallBeenLive] = useState(false)
   const [callRefId, setCallRefId] = useState<string | null>(null)
+  const latestCallRef = useRef<string | null>(null)
+  useEffect(() => { latestCallRef.current = callRefId }, [callRefId])
 
   const [rowsPerPage, setRowsPerPage] = useState(15)
 
@@ -102,6 +104,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
     
     if (callDuration % 5 === 0) {
       checkCallStatusAction(callRefId || undefined).then(status => {
+        if (latestCallRef.current !== callRefId) return;
         if (status.active === true) {
           setHasCallBeenLive(true);
         } else if (status.active === false) {
@@ -114,6 +117,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
               refId: callRefId,
               duration: callDuration
             }).then(result => {
+              if (latestCallRef.current !== callRefId) return;
               if (!result.success || !result.callRecord) {toast.error(result.error || 'Failed to save call log');return}
               const newStatus = result.callStatus;
               const newCallRecord = result.callRecord;
@@ -146,6 +150,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
             }).catch(() => {});
           }
           setTimeout(() => {
+            if (latestCallRef.current !== callRefId) return;
             setActiveCallLead(null);
             setIsCalling(false);
             setCallDuration(0);

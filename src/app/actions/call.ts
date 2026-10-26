@@ -11,8 +11,15 @@ export async function initiateCallAction(leadId: string) {
   const lead = await prisma.lead.findUniqueOrThrow({ where: { id: leadId }, select: { mobileNumber: true } })
   let callId: string | undefined
   try {
-    const pending = await prisma.callRecord.findFirst({ where: { userId: user.id, status: { in: pendingCallStatuses } }, orderBy: { createdAt: 'desc' } })
-    if (pending && !(await refreshStoredCall(pending)).complete) return { error: 'Your previous call is still active or awaiting confirmation. Please finish it before calling again.' }
+    const pending = await prisma.callRecord.findMany({ where: { userId: user.id, status: { in: pendingCallStatuses } }, orderBy: { createdAt: 'desc' } })
+    for (const previous of pending) {
+      let current = await refreshStoredCall(previous)
+      if (!current.complete && current.recheckAfterMs) {
+        await new Promise(resolve => setTimeout(resolve, current.recheckAfterMs))
+        current = await refreshStoredCall(await prisma.callRecord.findUniqueOrThrow({ where: { id: previous.id } }))
+      }
+      if (!current.complete) return { error: 'Your previous call is still active or awaiting confirmation. Please finish it before calling again.' }
+    }
     const call = await prisma.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`
       if (await tx.callRecord.findFirst({ where: { userId: user.id, status: { in: pendingCallStatuses } } })) return null

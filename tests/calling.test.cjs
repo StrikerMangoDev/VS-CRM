@@ -6,7 +6,7 @@ if(!['127.0.0.1','localhost'].includes(target.hostname)||target.pathname!=='/vsc
 process.env.DATABASE_URL=process.env.TEST_DATABASE_URL
 delete process.env.DIRECT_URL
 const {load,withCookies}=require('./source-loader.cjs')
-let db,actions,actor,other,tokens={},records=new Map(),requests=[],nextRef,providerError=false,networkError=false
+let db,actions,actor,other,tokens={},records=new Map(),requests=[],nextRef,providerError=false,networkError=false,liveRows=[]
 const originalFetch=global.fetch,originalToken=process.env.SMARTFLO_API_TOKEN
 const run=(user,fn)=>withCookies({vscrm_session:tokens[user]},fn)
 async function lead(){return db.lead.create({data:{uniqueId:'CALL-'+randomUUID(),name:'Calling regression',mobileNumber:'9999999999',paymentStatus:'NO_PAYMENT',assignments:{create:{userId:actor.id,stage:'FRESH_LOG'}}}})}
@@ -28,14 +28,14 @@ before(async()=>{
   if(networkError)throw new TypeError('Simulated network failure')
   if(providerError)return new Response(JSON.stringify({success:false,message:'Simulated provider failure'}),{status:400})
   if(url.pathname.endsWith('/click_to_call'))return Response.json({success:true,ref_id:nextRef})
-  if(url.pathname.endsWith('/live_calls'))return Response.json([])
+  if(url.pathname.endsWith('/live_calls'))return Response.json(liveRows)
   if(url.pathname.endsWith('/call/records'))return Response.json({results:records.get(url.searchParams.get('ref_id'))||[]})
   throw Error('Unexpected Smartflo endpoint')
  }
 })
 beforeEach(async()=>{
  await db.callRecord.deleteMany({where:{userId:{in:[actor.id,other.id]}}})
- records=new Map();requests=[];nextRef=randomUUID();providerError=false;networkError=false
+ records=new Map();requests=[];nextRef=randomUUID();providerError=false;networkError=false;liveRows=[]
 })
 after(async()=>{
  global.fetch=originalFetch
@@ -135,4 +135,56 @@ test('reconciling an older call does not overwrite a newer lead outcome',async()
  records.set(value.ref,[final(value.ref,'missed',0)])
  await run('actor',()=>actions.checkCallStatusAction(value.ref))
  assert.equal((await db.lead.findUnique({where:{id:value.lead.id}})).callStatus,'CALL_CONNECTED')
+})
+
+test('a second call starts when the old call ended but Smartflo has no final CDR',async()=>{
+ const first=await start()
+ await db.callRecord.update({where:{smartfloRefId:first.ref},data:{createdAt:new Date(Date.now()-120000)}})
+ nextRef=randomUUID()
+ const second=await start()
+ assert.notEqual(first.ref,second.ref)
+ const old=await db.callRecord.findUniqueOrThrow({where:{smartfloRefId:first.ref}})
+ assert.equal(old.status,'AWAITING_RESULT');assert.equal(old.duration,0)
+ assert.equal((await db.lead.findUnique({where:{id:first.lead.id}})).callStatus,'UNTOUCHED')
+ assert.equal((await db.callRecord.findFirst({where:{leadId:second.lead.id}})).status,'RINGING')
+ assert.equal(requests.filter(request=>request.body).length,2)
+})
+
+test('a live agent call stays protected, then two absent checks end the UI before CDR arrives',async()=>{
+ const value=await start()
+ liveRows=[{call_id:'provider-channel',source:'+919999999991',destination:'09999999999',state:'Answered'}]
+ assert.equal((await run('actor',()=>actions.checkCallStatusAction(value.ref))).active,true)
+ assert.equal((await db.callRecord.findUnique({where:{smartfloRefId:value.ref}})).status,'ACTIVE')
+ const blocked=await run('actor',()=>actions.initiateCallAction(value.lead.id))
+ assert.ok(blocked.error);assert.equal(requests.filter(request=>request.body).length,1)
+ liveRows=[]
+ assert.equal((await run('actor',()=>actions.checkCallStatusAction(value.ref))).active,true)
+ await new Promise(resolve=>setTimeout(resolve,5100))
+ assert.equal((await run('actor',()=>actions.checkCallStatusAction(value.ref))).active,false)
+ const result=await run('actor',()=>actions.saveCallLogAction({leadId:value.lead.id,refId:value.ref,duration:25}))
+ assert.equal(result.callRecord.status,'AWAITING_RESULT');assert.equal(result.callRecord.duration,0)
+ assert.equal(result.callStatus,'UNTOUCHED')
+})
+
+test('a delayed final result reconciles released calls without changing a newer lead outcome',async()=>{
+ const value=await start()
+ await db.callRecord.update({where:{smartfloRefId:value.ref},data:{status:'AWAITING_RESULT'}})
+ await db.callRecord.create({data:{leadId:value.lead.id,userId:actor.id,smartfloRefId:'manual_'+randomUUID(),status:'COMPLETED',duration:50,createdAt:new Date(Date.now()+1000)}})
+ await db.lead.update({where:{id:value.lead.id},data:{callStatus:'CALL_CONNECTED'}})
+ records.set(value.ref,[final(value.ref,'missed',0)])
+ const logs=await run('actor',()=>load('src/app/actions/lead.ts').getCallLogsAction(value.lead.id))
+ const row=logs.find(call=>call.smartfloRefId===value.ref)
+ assert.equal(row.status,'COMPLETED');assert.ok(row.recordingUrl)
+ assert.equal((await db.lead.findUnique({where:{id:value.lead.id}})).callStatus,'CALL_CONNECTED')
+})
+
+test('an old lost initiation response cannot block calling forever once the agent is confirmed idle',async()=>{
+ networkError=true;const first=await lead()
+ assert.ok((await run('actor',()=>actions.initiateCallAction(first.id))).error)
+ const unknown=await db.callRecord.findFirstOrThrow({where:{leadId:first.id}})
+ await db.callRecord.update({where:{id:unknown.id},data:{createdAt:new Date(Date.now()-180000)}})
+ networkError=false;nextRef=randomUUID()
+ await start()
+ assert.equal((await db.callRecord.findUnique({where:{id:unknown.id}})).status,'AWAITING_RESULT')
+ assert.equal(requests.filter(request=>request.body).length,2)
 })

@@ -4,7 +4,7 @@ import {getLeadBulkOptions} from '@/app/actions/lead-query'
 import { useLeadPage,usePageNumber,allMatchingLeads,dateBounds } from '@/hooks/use-lead-page'
 import type { LeadPage,LeadQuery,LeadBulkOption } from '@/lib/lead-query'
 
-import React,{ useState,useEffect } from 'react'
+import React,{ useState,useEffect,useRef } from 'react'
 import { updateLeadAction,assignLeadAction,bulkAssignLeadsAction,deleteLeadAction,unassignLeadAction,bulkDeleteLeadsAction } from '@/app/actions/lead'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -107,6 +107,8 @@ function MasterLeadTable({
   const [isCallConnected, setIsCallConnected] = useState(false)
   const [hasCallBeenLive, setHasCallBeenLive] = useState(false)
   const [callRefId, setCallRefId] = useState<string | null>(null)
+  const latestCallRef = useRef<string | null>(null)
+  useEffect(() => { latestCallRef.current = callRefId }, [callRefId])
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -124,6 +126,7 @@ function MasterLeadTable({
     // Poll API every 5 seconds
     if (callDuration % 5 === 0) {
       checkCallStatusAction(callRefId || undefined).then(status => {
+        if (latestCallRef.current !== callRefId) return;
         if (status.active === true) {
           setHasCallBeenLive(true);
         } else if (status.active === false) {
@@ -142,6 +145,7 @@ function MasterLeadTable({
               }).catch(() => {});
             }
             setTimeout(() => {
+              if (latestCallRef.current !== callRefId) return;
               setActiveCallLead(null);
               setIsCalling(false);
               setCallDuration(0);

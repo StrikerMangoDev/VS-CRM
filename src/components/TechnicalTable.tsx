@@ -3,7 +3,7 @@ import BodyPortal from '@/components/BodyPortal'
 import { useLeadPage,usePageNumber } from '@/hooks/use-lead-page'
 import type { LeadPage } from '@/lib/lead-query'
 
-import { useState,useTransition,useEffect } from 'react'
+import { useState,useTransition,useEffect,useRef } from 'react'
 import { updateTechnicalStageAction,updateWhatsAppStatusAction,updateAccessDetailsAction } from '@/app/actions/lead'
 import { initiateCallAction,checkCallStatusAction,saveCallLogAction } from '@/app/actions/call'
 import { PhoneCall,PhoneOff } from 'lucide-react'
@@ -19,6 +19,8 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
   const [isCallConnected, setIsCallConnected] = useState(false)
   const [, setHasCallBeenLive] = useState(false)
   const [callRefId, setCallRefId] = useState<string | null>(null)
+  const latestCallRef = useRef<string | null>(null)
+  useEffect(() => { latestCallRef.current = callRefId }, [callRefId])
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -35,6 +37,7 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
     
     if (callDuration % 5 === 0) {
       checkCallStatusAction(callRefId || undefined).then(status => {
+        if (latestCallRef.current !== callRefId) return;
         if (status.active === true) {
           setHasCallBeenLive(true);
         } else if (status.active === false) {
@@ -169,6 +172,7 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
                           setIsCalling(true);
                           setCallDuration(0);
                           setIsCallConnected(false);
+                          setCallRefId(null);
                           setHasCallBeenLive(false);
                           setCallStatusMessage('Initiating call...');
                           initiateCallAction(lead.id).then(res => {
@@ -250,6 +254,7 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
                         setIsCalling(true);
                         setCallDuration(0);
                         setIsCallConnected(false);
+                        setCallRefId(null);
                         setHasCallBeenLive(false);
                         setCallStatusMessage('Initiating call...');
                         initiateCallAction(lead.id).then(res => {

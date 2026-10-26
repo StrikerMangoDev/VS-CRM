@@ -4,7 +4,8 @@ import { prisma } from './prisma'
 type ProviderRecord = Record<string, unknown>
 const callerIds = ['917969081999', '917969081998', '917969081997', '917969081996', '917969081995', '917969081994', '917969081993', '917969081992', '917969081991']
 export const pendingCallStatuses = ['INITIATING', 'RINGING', 'ACTIVE', 'UNKNOWN']
-const providerQueue = globalThis as unknown as { smartfloRequestTurn?: Promise<void> }
+const providerQueue = globalThis as unknown as { smartfloRequestTurn?: Promise<void>; smartfloAbsentCalls?: Map<string, number> }
+const absentCalls = providerQueue.smartfloAbsentCalls ??= new Map<string, number>()
 
 async function request(path: string, body?: ProviderRecord): Promise<unknown> {
   const token = process.env.SMARTFLO_API_TOKEN
@@ -63,20 +64,48 @@ export async function smartfloLiveCalls(refId?: string) {
 }
 
 export async function refreshStoredCall(call: CallRecord) {
-  if (!process.env.SMARTFLO_API_TOKEN || /^(manual_|local_|pending_)/.test(call.smartfloRefId)) return { call, complete: !pendingCallStatuses.includes(call.status) }
-  const final = await finalSmartfloCall(call.smartfloRefId)
-  if (!final) return { call, complete: false }
+  const pending = pendingCallStatuses.includes(call.status)
+  if (!process.env.SMARTFLO_API_TOKEN || /^(manual_|local_)/.test(call.smartfloRefId)) return { call, complete: !pending, recheckAfterMs: 0 }
+  if (!pending && call.status !== 'AWAITING_RESULT' && call.recordingUrl) return { call, complete: true, recheckAfterMs: 0 }
+  const user = pending ? await prisma.user.findUnique({ where: { id: call.userId }, select: { mobileNumber: true } }) : null
+  const agent = (user?.mobileNumber || '').replace(/\D/g, '').slice(-10)
+  if (pending) {
+    const live = await smartfloLiveCalls().catch(error => { absentCalls.delete(call.id); throw error })
+    const active = live.some(row => [row.ref_id, row.call_id, row.uuid].includes(call.smartfloRefId) || (agent.length === 10 && [row.source, row.destination, row.agent_number, row.agent_number_with_prefix, row.multiple_destination_name].some(value => String(value || '').match(/\d+/g)?.some(number => number.length >= 10 && number.slice(-10) === agent))))
+    if (active) {
+      absentCalls.delete(call.id)
+      await prisma.callRecord.updateMany({ where: { id: call.id, status: { in: pendingCallStatuses } }, data: { status: 'ACTIVE' } })
+      const current = await prisma.callRecord.findUniqueOrThrow({ where: { id: call.id } })
+      return { call: current, complete: !pendingCallStatuses.includes(current.status), recheckAfterMs: 0 }
+    }
+  }
+  const final = call.smartfloRefId.startsWith('pending_') ? null : await finalSmartfloCall(call.smartfloRefId).catch(error => { absentCalls.delete(call.id); if (pending) throw error; return null })
+  if (!final) {
+    if (!pending) return { call, complete: true, recheckAfterMs: 0 }
+    const grace = call.smartfloRefId.startsWith('pending_') ? 120000 : 60000
+    if (agent.length !== 10 || (call.status !== 'ACTIVE' && Date.now() - call.createdAt.getTime() < grace)) return { call, complete: false, recheckAfterMs: 0 }
+    // Confirm absence twice, five seconds apart, after ringing grace; CDR delivery may lag.
+    const absentSince = absentCalls.get(call.id) ?? Date.now()
+    absentCalls.set(call.id, absentSince)
+    const remaining = Math.max(0, 5000 - (Date.now() - absentSince))
+    if (remaining) return { call, complete: false, recheckAfterMs: remaining }
+    await prisma.callRecord.updateMany({ where: { id: call.id, smartfloRefId: call.smartfloRefId, status: { in: pendingCallStatuses } }, data: { status: 'AWAITING_RESULT' } })
+    absentCalls.delete(call.id)
+    const current = await prisma.callRecord.findUniqueOrThrow({ where: { id: call.id } })
+    return { call: current, complete: !pendingCallStatuses.includes(current.status), recheckAfterMs: 0 }
+  }
+  absentCalls.delete(call.id)
   const updated = await prisma.$transaction(async tx => {
     const saved = await tx.callRecord.update({ where: { id: call.id }, data: { duration: final.duration, status: 'COMPLETED', ...(final.recordingUrl ? { recordingUrl: final.recordingUrl } : {}) } })
     const latest = await tx.callRecord.findFirst({ where: { leadId: call.leadId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true } })
     if (latest?.id === call.id) await tx.lead.update({ where: { id: call.leadId }, data: { callStatus: final.connected ? 'CALL_CONNECTED' : 'CALL_NOT_CONNECTED' } })
     return saved
   })
-  return { call: updated, complete: true }
+  return { call: updated, complete: true, recheckAfterMs: 0 }
 }
 
 export async function refreshPendingCalls(calls: CallRecord[]) {
-  const pending = calls.filter(call => pendingCallStatuses.includes(call.status))
+  const pending = calls.filter(call => pendingCallStatuses.includes(call.status) || call.status === 'AWAITING_RESULT')
   // Limit concurrent provider reads when a user returns after closing a calling tab.
   for (let index = 0; index < pending.length; index += 4) await Promise.all(pending.slice(index, index + 4).map(call => refreshStoredCall(call).catch(() => null)))
   return pending.length > 0
