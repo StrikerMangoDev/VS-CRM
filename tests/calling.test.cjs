@@ -6,7 +6,7 @@ if(!['127.0.0.1','localhost'].includes(target.hostname)||target.pathname!=='/vsc
 process.env.DATABASE_URL=process.env.TEST_DATABASE_URL
 delete process.env.DIRECT_URL
 const {load,withCookies}=require('./source-loader.cjs')
-let db,actions,actor,other,tokens={},records=new Map(),requests=[],nextRef,providerError=false,networkError=false,liveRows=[]
+let db,actions,actor,other,tokens={},records=new Map(),requests=[],nextRef,providerError=false,networkError=false,liveRows=[],throttleReads=0
 const originalFetch=global.fetch,originalToken=process.env.SMARTFLO_API_TOKEN
 const run=(user,fn)=>withCookies({vscrm_session:tokens[user]},fn)
 async function lead(){return db.lead.create({data:{uniqueId:'CALL-'+randomUUID(),name:'Calling regression',mobileNumber:'9999999999',paymentStatus:'NO_PAYMENT',assignments:{create:{userId:actor.id,stage:'FRESH_LOG'}}}})}
@@ -26,6 +26,7 @@ before(async()=>{
   const url=new URL(String(input));assert.equal(url.origin,'https://api-smartflo.tatateleservices.com','Unexpected network access')
   requests.push({url,body:options.body?JSON.parse(options.body):null,startedAt:Date.now()})
   if(networkError)throw new TypeError('Simulated network failure')
+  if(throttleReads>0&&!options.body){throttleReads--;return Response.json({success:false,message:'Too many requests.'},{status:429})}
   if(providerError)return new Response(JSON.stringify({success:false,message:'Simulated provider failure'}),{status:400})
   if(url.pathname.endsWith('/click_to_call'))return Response.json({success:true,ref_id:nextRef})
   if(url.pathname.endsWith('/live_calls'))return Response.json(liveRows)
@@ -35,7 +36,8 @@ before(async()=>{
 })
 beforeEach(async()=>{
  await db.callRecord.deleteMany({where:{userId:{in:[actor.id,other.id]}}})
- records=new Map();requests=[];nextRef=randomUUID();providerError=false;networkError=false;liveRows=[]
+ records=new Map();requests=[];nextRef=randomUUID();providerError=false;networkError=false;liveRows=[];throttleReads=0
+ process.env.SMARTFLO_API_TOKEN='isolated-'+randomUUID()
 })
 after(async()=>{
  global.fetch=originalFetch
@@ -53,10 +55,24 @@ test('accepted calls are durable before polling, use async initiation, and retai
 
 test('simultaneous provider reads are paced instead of bursting the account limit',async()=>{
  const smartflo=load('src/lib/smartflo.ts')
- await Promise.all([smartflo.smartfloLiveCalls(),smartflo.smartfloLiveCalls(),smartflo.smartfloLiveCalls()])
+ await Promise.all([smartflo.finalSmartfloCall('one'),smartflo.finalSmartfloCall('two'),smartflo.finalSmartfloCall('three')])
  assert.equal(requests.length,3)
- assert.ok(requests[1].startedAt-requests[0].startedAt>=450)
- assert.ok(requests[2].startedAt-requests[1].startedAt>=450)
+ assert.ok(requests[1].startedAt-requests[0].startedAt>=1000)
+ assert.ok(requests[2].startedAt-requests[1].startedAt>=1000)
+})
+
+test('concurrent users share an in-flight live-call read and its short-lived snapshot',async()=>{
+ const smartflo=load('src/lib/smartflo.ts')
+ await Promise.all(Array.from({length:10},()=>smartflo.smartfloLiveCalls()))
+ await smartflo.smartfloLiveCalls()
+ assert.equal(requests.length,1)
+})
+
+test('throttled status reads recover without retrying call initiation',async()=>{
+ const value=await start();records.set(value.ref,[final(value.ref,'answered',46)]);throttleReads=1
+ assert.equal((await run('actor',()=>actions.checkCallStatusAction(value.ref))).active,false)
+ assert.equal(requests.filter(request=>request.body).length,1)
+ assert.equal((await db.callRecord.findUnique({where:{smartfloRefId:value.ref}})).duration,46)
 })
 test('empty live-call results and delayed CDR never fabricate a disconnection',async()=>{
  const value=await start()
@@ -158,6 +174,7 @@ test('a live agent call stays protected, then two absent checks end the UI befor
  const blocked=await run('actor',()=>actions.initiateCallAction(value.lead.id))
  assert.ok(blocked.error);assert.equal(requests.filter(request=>request.body).length,1)
  liveRows=[]
+ await new Promise(resolve=>setTimeout(resolve,5100))
  assert.equal((await run('actor',()=>actions.checkCallStatusAction(value.ref))).active,true)
  await new Promise(resolve=>setTimeout(resolve,5100))
  assert.equal((await run('actor',()=>actions.checkCallStatusAction(value.ref))).active,false)

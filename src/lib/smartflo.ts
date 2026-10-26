@@ -4,21 +4,26 @@ import { prisma } from './prisma'
 type ProviderRecord = Record<string, unknown>
 const callerIds = ['917969081999', '917969081998', '917969081997', '917969081996', '917969081995', '917969081994', '917969081993', '917969081992', '917969081991']
 export const pendingCallStatuses = ['INITIATING', 'RINGING', 'ACTIVE', 'UNKNOWN']
-const providerQueue = globalThis as unknown as { smartfloRequestTurn?: Promise<void>; smartfloAbsentCalls?: Map<string, number> }
+const providerQueue = globalThis as unknown as { smartfloRequestTurn?: Promise<void>; smartfloAbsentCalls?: Map<string, number>; smartfloLiveSnapshot?: { token?: string; expiresAt: number; value: Promise<ProviderRecord[]> } }
 const absentCalls = providerQueue.smartfloAbsentCalls ??= new Map<string, number>()
 
-async function request(path: string, body?: ProviderRecord): Promise<unknown> {
+async function request(path: string, body?: ProviderRecord, retry = 0): Promise<unknown> {
   const token = process.env.SMARTFLO_API_TOKEN
   if (!token) throw new Error('Smartflo API integration is not configured. Missing SMARTFLO_API_TOKEN.')
   // Smartflo applies an account-wide requests-per-second limit; stagger users' polls.
   const turn = providerQueue.smartfloRequestTurn ?? Promise.resolve()
-  providerQueue.smartfloRequestTurn = turn.then(() => new Promise<void>(resolve => setTimeout(resolve, 500)))
+  providerQueue.smartfloRequestTurn = turn.then(() => new Promise<void>(resolve => setTimeout(resolve, 1100)))
   await turn
   const response = await fetch('https://api-smartflo.tatateleservices.com/v1/' + path, {
     method: body ? 'POST' : 'GET',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', signal: AbortSignal.timeout(20000),
   })
+  if (!body && response.status === 429 && retry < 2) {
+    await response.body?.cancel()
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    return request(path, undefined, retry + 1)
+  }
   const data: unknown = await response.json()
   const result = data as ProviderRecord | null
   if (!response.ok || result?.success === false || result?.status === 'error') {
@@ -60,7 +65,17 @@ export async function finalSmartfloCall(refId: string) {
 }
 
 export async function smartfloLiveCalls(refId?: string) {
-  return providerRecords(await request('live_calls' + (refId ? '?ref_id=' + encodeURIComponent(refId) : '')))
+  const token = process.env.SMARTFLO_API_TOKEN
+  const cached = providerQueue.smartfloLiveSnapshot
+  if (!refId && cached && cached.token === token && Date.now() < cached.expiresAt) return cached.value
+  const value = request('live_calls' + (refId ? '?ref_id=' + encodeURIComponent(refId) : '')).then(providerRecords)
+  if (!refId) {
+    // Share the provider's complete live list across users, including in-flight reads.
+    const snapshot = { token, expiresAt: Infinity, value }
+    providerQueue.smartfloLiveSnapshot = snapshot
+    void value.then(() => { snapshot.expiresAt = Date.now() + 5000 }, () => { if (providerQueue.smartfloLiveSnapshot === snapshot) delete providerQueue.smartfloLiveSnapshot })
+  }
+  return value
 }
 
 export async function refreshStoredCall(call: CallRecord) {
