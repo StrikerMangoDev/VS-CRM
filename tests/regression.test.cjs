@@ -11,7 +11,7 @@ if (enabled) {
   delete process.env.DIRECT_URL
 }
 const { load, withCookies, sentMail } = require('./source-loader.cjs')
-let db, auth, users, tokens, webinar, original
+let db, auth, users, tokens, webinar, original, transferGroup
 const form = object => { const result = new FormData(); for (const [key,value] of Object.entries(object)) result.set(key,value); return result }
 const run = (role, work) => withCookies({ vscrm_session: tokens[role] }, work)
 before(async () => {
@@ -243,5 +243,71 @@ integration('password reset never exposes its OTP and revokes all old sessions',
   assert.equal(result.success,true);assert.equal(await auth.resolveSession(tokens.editor),null)
   const replay=await withCookies({},()=>actions.resetPassword(form({email:users.editor.email,otp,newPassword:'OtherPassword123!'})))
   assert.ok(replay.error)
+})
+
+integration('lead edits return persisted fields for Sales and Recovery and preserve authorization', async () => {
+  const actions=load('src/app/actions/lead.ts')
+  const recovery=await db.user.create({data:{email:'save-'+randomBytes(5).toString('hex')+'@example.invalid',name:'Recovery save test',role:'EXEC',department:'RECOVERY',mainDepartment:'Sales Department'}})
+  const token=randomBytes(32).toString('hex')
+  await db.session.create({data:{tokenHash:auth.tokenHash(token),userId:recovery.id,expiresAt:new Date(Date.now()+60000)}})
+  await db.assignment.create({data:{leadId:original.id,userId:recovery.id,stage:'FRESH_LOG'}})
+  const followUp=new Date('2026-11-04T12:30:00Z')
+  const saved=await run('exec',()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'SALES',callStatus:'CALL_CONNECTED',remark1:'Saved sales note',remark2:'Second note',nextFollowUpDate:followUp,totalPayment:250,amount1:50}))
+  assert.equal(saved.remark1,'Saved sales note');assert.equal(saved.salesAmount,250)
+  assert.equal(saved.nextFollowUpDate.toISOString(),followUp.toISOString())
+  const recovered=await withCookies({vscrm_session:token},()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'RECOVERY',remark2:'Recovery saved',totalPayment:300}))
+  assert.equal(recovered.recoveryAmount,300);assert.equal(recovered.salesAmount,250)
+  const persisted=await db.lead.findUnique({where:{id:original.id}})
+  for(const key of ['remark1','remark2','callStatus','amount1','totalPayment','salesAmount','recoveryAmount'])assert.equal(recovered[key],persisted[key])
+  assert.ok(await db.auditHistory.count({where:{leadId:original.id,field:'Remark 1'}}))
+  await assert.rejects(()=>run('exec',()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'RECOVERY',remark1:'Wrong department'})),/Forbidden/)
+  await assert.rejects(()=>run('exec',()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'SALES',nextFollowUpDate:new Date('invalid')})),/Invalid follow-up/)
+  assert.equal((await db.lead.findUnique({where:{id:original.id}})).remark1,'Saved sales note')
+})
+
+integration('webinar transfers reject invalid targets and repeats, retain history and allocate beyond imported IDs', async () => {
+  const actions=load('src/app/actions/lead.ts')
+  const target=await db.webinarMaster.create({data:{id:'MOVE-'+randomBytes(5).toString('hex'),categoryId:webinar.categoryId,name:'Transfer target '+randomBytes(5).toString('hex'),date:new Date(),endDate:new Date(),whatsappGroupUrl:'https://example.invalid/group'}})
+  transferGroup=Date.now()
+  const prefix='WEB-'+transferGroup+'-'
+  await db.lead.createMany({data:[{uniqueId:prefix+'10000',name:'Earlier high ID',mobileNumber:'0000000011',paymentStatus:'NO_PAYMENT',webinarId:target.id,webinarName:target.name,createdAt:new Date('2020-01-01')},{uniqueId:prefix+'0002',name:'Newest low ID',mobileNumber:'0000000012',paymentStatus:'NO_PAYMENT',webinarId:target.id,webinarName:target.name}]})
+  const before=await db.lead.findUnique({where:{id:original.id},include:{assignments:true,auditLogs:true,callRecords:true}})
+  await assert.rejects(()=>run('tech',()=>actions.transferLeadWebinarAction(original.id,target.id)),/Forbidden/)
+  assert.equal((await run('exec',()=>actions.transferLeadWebinarAction(original.id,'missing-webinar'))).success,false)
+  assert.equal((await run('exec',()=>actions.transferLeadWebinarAction(original.id,webinar.id))).success,false)
+  assert.equal((await db.lead.findUnique({where:{id:original.id}})).isTransferred,false)
+  const {withLeadTransaction}=load('src/lib/prisma.ts')
+  await assert.rejects(()=>run('exec',()=>withLeadTransaction(async()=>{assert.equal((await actions.transferLeadWebinarAction(original.id,target.id)).success,true);throw new Error('rollback test')})),/rollback test/)
+  assert.equal(await db.lead.count({where:{webinarId:target.id}}),2)
+  assert.equal((await db.lead.findUnique({where:{id:original.id}})).isTransferred,false)
+  const results=await Promise.all([1,2].map(()=>run('exec',()=>actions.transferLeadWebinarAction(original.id,target.id))))
+  assert.equal(results.filter(r=>r.success).length,1)
+  assert.equal(await db.lead.count({where:{webinarId:target.id}}),3)
+  const copy=await db.lead.findUnique({where:{uniqueId:prefix+'10001'},include:{assignments:true}})
+  assert.equal(copy.name,before.name);assert.equal(copy.mobileNumber,before.mobileNumber)
+  assert.equal(copy.leadStatus,'UNASSIGNED');assert.equal(copy.callStatus,'UNTOUCHED');assert.equal(copy.totalPayment,0);assert.equal(copy.assignments.length,0)
+  const after=await db.lead.findUnique({where:{id:original.id},include:{assignments:true,auditLogs:true,callRecords:true}})
+  assert.equal(after.isTransferred,true);assert.equal(after.leadStatus,'CLOSED')
+  for(const key of ['totalPayment','partPaymentAmount','salesAmount','recoveryAmount','remark1','remark2'])assert.equal(after[key],before[key])
+  for(const key of ['assignments','auditLogs','callRecords'])assert.deepEqual(after[key],before[key])
+  await run('admin',()=>actions.createLeadAction(form({name:'Manual target lead',mobileNumber:'0000000031',webinarId:target.id})))
+  assert.ok(await db.lead.findUnique({where:{uniqueId:prefix+'10002'}}))
+  const imported=await run('admin',()=>actions.bulkUploadChunkAction([{name:'Imported target lead',mobile:'0000000032','webinar id':target.id}],'NO_PAYMENT','[]'))
+  assert.equal(imported.successCount,1)
+  assert.ok(await db.lead.findUnique({where:{uniqueId:prefix+'10003'}}))
+})
+
+integration('shared lead allocator uses the highest numeric suffix and a new webinar group', async () => {
+  const {nextLeadId}=load('src/lib/ids.ts'),{withLeadTransaction}=load('src/lib/prisma.ts')
+  const high=Date.now()
+  await db.lead.createMany({data:[{uniqueId:'L-'+high,name:'Imported high',mobileNumber:'0000000011',paymentStatus:'NO_PAYMENT',createdAt:new Date('2020-01-01')},{uniqueId:'L-'+(high-1),name:'Newer low',mobileNumber:'0000000012',paymentStatus:'NO_PAYMENT'}]})
+  assert.equal(await withLeadTransaction(()=>nextLeadId(null,null)),'L-'+(high+1))
+  assert.equal(await withLeadTransaction(()=>nextLeadId('new-empty-webinar',null)),'WEB-'+(transferGroup+1)+'-0001')
+})
+
+test('outdated server-action failures ask for a refresh without exposing backend details',()=>{
+  const {actionErrorMessage}=load('src/lib/action-error.ts')
+  for(const message of ['Server Action "123" was not found on the server.','Failed to find Server Action "123". This request might be from an older or newer deployment.'])assert.match(actionErrorMessage(new Error(message),'Failed to save changes.'),/Refresh the page/)
+  assert.equal(actionErrorMessage(new Error('private database details'),'Failed to save changes.'),'Failed to save changes.')
 })
 

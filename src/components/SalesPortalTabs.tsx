@@ -285,7 +285,7 @@ export default function SalesPortalTabs({
               issues={issues}
             />
           ) : (
-            <AnalyticsDashboard leadQuery={{sheet:portalType,analytics:true}} leads={filteredLeads} executives={executives} userRole={userRole} />
+            <AnalyticsDashboard leadQuery={{sheet:portalType,analytics:true}} leads={filteredLeads} executives={executives} userRole={userRole} currentUser={currentUser} />
           )}
         </div>
       )}

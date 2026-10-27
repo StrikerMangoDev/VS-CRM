@@ -1,5 +1,7 @@
 'use client'
 import BodyPortal from '@/components/BodyPortal'
+import { useRouter } from 'next/navigation'
+import { actionErrorMessage } from '@/lib/action-error'
 import { useLeadPage,usePageNumber,dateBounds,followBounds,allMatchingLeads } from '@/hooks/use-lead-page';
 import type { LeadPage,LeadQuery } from '@/lib/lead-query';
 import toast from 'react-hot-toast';
@@ -18,6 +20,7 @@ import { transferLeadWebinarAction } from '@/app/actions/lead';
 import { useConfirm } from '@/providers/ConfirmProvider';
 
 export default function SalesTable({ initialPage, webinarFilter, isAdmin = false, updaterDepartment = '', customColumns = [], sheetName = 'SALES', webinars = [], executives = [], isClosed = false, userRole = '', startCallingRequest = 0 }: { initialPage: LeadPage, webinarFilter?: string | null, isAdmin?: boolean, updaterDepartment?: string, customColumns?: import('@prisma/client').CustomColumn[], sheetName?: string, webinars?: import('@prisma/client').WebinarMaster[], executives?: import('@/lib/view-types').Person[], isClosed?: boolean, userRole?: string, startCallingRequest?: number }) {
+  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
   const [filterLogStatus, setFilterLogStatus] = useState(sheetName === 'RECOVERY' ? 'Fresh Log' : '')
   const [filterCallStatus, setFilterCallStatus] = useState<string>('all')
@@ -297,14 +300,19 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
       const res = await transferLeadWebinarAction(transferModalLead.id, transferWebinarId);
       if (res.success) {
         setLocalLeads(prev => prev.filter(l => l.id !== transferModalLead.id));
+        const queue = powerDialerLeads.filter(l => l.id !== transferModalLead.id)
+        setPowerDialerLeads(queue)
+        setPowerDialerIndex(index => Math.max(0, Math.min(index, queue.length - 1)))
+        if (!queue.length) setIsPowerDialerMode(false)
         setTransferModalLead(null);
         setTransferWebinarId('');
+        router.refresh()
       } else {
         alert(res.error || 'Failed to transfer lead');
       }
     } catch (e) {
       console.error(e);
-      alert('Error transferring lead');
+      alert(actionErrorMessage(e, 'Error transferring lead'));
     } finally {
       setIsTransferring(false);
     }
@@ -855,7 +863,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
       )}
 
       {transferModalLead && (
-        <div style={{
+        <BodyPortal><div style={{
           position: 'fixed',
           top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(0, 0, 0, 0.75)',
@@ -914,7 +922,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* WhatsApp Message Preview & Direct Send Modal */}

@@ -10,6 +10,7 @@ import { calculateLeadStatus } from '@/utils/leadStatus'
 import { prisma,withLeadTransaction } from '@/lib/prisma'
 import { createHash } from 'node:crypto'
 import { refreshPendingCalls } from '@/lib/smartflo'
+import { nextLeadId } from '@/lib/ids'
 
 
 async function generateNextPartPaymentId() {
@@ -772,72 +773,7 @@ export async function createLeadAction(formData: FormData) {
 
   while (attempts < maxAttempts) {
     try {
-      let uniqueId = ''
-
-      if (webinarName || webinarId) {
-        let prefix = 'WEB-01'
-        let nextNum = 1
-
-        const existingWebinarLead = await prisma.lead.findFirst({
-          where: { 
-            OR: [
-              ...(webinarId ? [{ webinarId }] : []),
-              ...(webinarName ? [{ webinarName }] : [])
-            ], 
-            uniqueId: { startsWith: 'WEB-' } 
-          },
-          orderBy: { createdAt: 'desc' }
-        })
-
-        if (existingWebinarLead) {
-          const parts = existingWebinarLead.uniqueId.split('-')
-          if (parts.length === 3) {
-            prefix = `${parts[0]}-${parts[1]}`
-            nextNum = parseInt(parts[2], 10) + 1
-          }
-        } else {
-          const allWebLeads = await prisma.lead.findMany({
-            where: { uniqueId: { startsWith: 'WEB-' } },
-            select: { uniqueId: true }
-          })
-          
-          let maxPrefixNum = 0
-          for (const lead of allWebLeads) {
-            const parts = lead.uniqueId.split('-')
-            if (parts.length >= 2) {
-              const num = parseInt(parts[1], 10)
-              if (!isNaN(num) && num > maxPrefixNum) {
-                maxPrefixNum = num
-              }
-            }
-          }
-          prefix = `WEB-${(maxPrefixNum > 0 ? maxPrefixNum + 1 : 1).toString().padStart(2, '0')}`
-          nextNum = 1
-        }
-        uniqueId = `${prefix}-${nextNum.toString().padStart(4, '0')}`
-      } else {
-        // Generate L-XXXX for non-webinar leads
-        let nextNum = 1001
-        const allL = await prisma.lead.findMany({
-          where: { uniqueId: { startsWith: 'L-' } },
-          select: { uniqueId: true }
-        })
-        
-        if (allL.length > 0) {
-          let maxNum = 1000
-          for (const l of allL) {
-            const parts = l.uniqueId.split('-')
-            if (parts.length === 2) {
-              const num = parseInt(parts[1], 10)
-              if (!isNaN(num) && num > maxNum) {
-                maxNum = num
-              }
-            }
-          }
-          nextNum = maxNum + 1
-        }
-        uniqueId = `L-${nextNum}`
-      }
+      const uniqueId = await nextLeadId(webinarId || null, webinarName || null)
 
       newLead = await prisma.lead.create({
         data: {
@@ -987,6 +923,7 @@ export async function updateLeadCompleteAction(
   const actor = await requireLeadAccess(leadId);
   if (actor.role === 'EXEC' && data.updaterDepartment !== actor.department) throw new Error('Forbidden');
   if ([data.amount1, data.amount2, data.amount3, data.discount, data.totalPayment].some(n => n != null && (!Number.isFinite(n) || n < 0))) throw new Error('Invalid amount');
+  if (data.nextFollowUpDate && !Number.isFinite(data.nextFollowUpDate.getTime())) throw new Error('Invalid follow-up date');
   const existingLead = await prisma.lead.findUnique({ where: { id: leadId } })
   if (!existingLead) throw new Error('Lead not found')
 
@@ -1057,14 +994,17 @@ export async function updateLeadCompleteAction(
     await logAuditChanges(leadId, changes)
   }
 
-  await prisma.lead.update({
+  const savedLead = await prisma.lead.update({
     where: { id: leadId },
-    data: dataToUpdate
+    data: dataToUpdate,
+    select: { id: true, callStatus: true, nextFollowUpDate: true, remark1: true, remark2: true, amount1: true, amount2: true, amount3: true, discount: true, totalPayment: true, salesAmount: true, recoveryAmount: true, leadStatus: true, whatsappTemplate: true, whatsappSentAt: true, updatedAt: true }
   })
 
   revalidatePath('/')
   revalidatePath('/sales')
   revalidatePath('/recovery')
+
+  return savedLead
 
   });
 }
@@ -1266,63 +1206,7 @@ export async function bulkUploadChunkAction(rows: Record<string, string>[], defa
         }
       }
 
-      let uniqueId = ''
-
-      if (webinarName || webinarId) {
-        let prefix = 'WEB-01'
-        let nextNum = 1
-
-        const existingWebinarLead = await prisma.lead.findFirst({
-          where: { 
-            OR: [
-              ...(webinarId ? [{ webinarId }] : []),
-              ...(webinarName ? [{ webinarName }] : [])
-            ], 
-            uniqueId: { startsWith: 'WEB-' } 
-          },
-          orderBy: { createdAt: 'desc' }
-        })
-
-        if (existingWebinarLead) {
-          const parts = existingWebinarLead.uniqueId.split('-')
-          if (parts.length === 3) {
-            prefix = `${parts[0]}-${parts[1]}`
-            nextNum = parseInt(parts[2], 10) + 1
-          }
-        } else {
-          const allWebLeads = await prisma.lead.findMany({
-            where: { uniqueId: { startsWith: 'WEB-' } },
-            select: { uniqueId: true }
-          })
-          
-          let maxPrefixNum = 0
-          for (const lead of allWebLeads) {
-            const parts = lead.uniqueId.split('-')
-            if (parts.length >= 2) {
-              const num = parseInt(parts[1], 10)
-              if (!isNaN(num) && num > maxPrefixNum) {
-                maxPrefixNum = num
-              }
-            }
-          }
-          prefix = `WEB-${(maxPrefixNum > 0 ? maxPrefixNum + 1 : 1).toString().padStart(2, '0')}`
-          nextNum = 1
-        }
-        uniqueId = `${prefix}-${nextNum.toString().padStart(4, '0')}`
-      } else {
-        let nextNum = 1001
-        const lastL = await prisma.lead.findFirst({
-          where: { uniqueId: { startsWith: 'L-' } },
-          orderBy: { createdAt: 'desc' }
-        })
-        if (lastL) {
-          const parts = lastL.uniqueId.split('-')
-          if (parts.length === 2) {
-            nextNum = parseInt(parts[1], 10) + 1
-          }
-        }
-        uniqueId = `L-${nextNum}`
-      }
+      const uniqueId = await nextLeadId(webinarId || null, webinarName || null)
 
       const initialStatus = calculateLeadStatus(parsedPaymentDate || new Date(), null)
 
@@ -1396,121 +1280,41 @@ export async function bulkUploadChunkAction(rows: Record<string, string>[], defa
 
 export async function transferLeadWebinarAction(leadId: string, newWebinarId: string) {
   return withLeadTransaction(async () => {
-
-  await requireLeadAccess(leadId, false);
-
-  try {
-    await cookies();
-    const sessionCookie = (await getSessionCookie())
-    if (!sessionCookie) return { success: false, error: 'Not authenticated' }
-    
-    const user = sessionCookie.user
-    if (!user) return { success: false, error: 'User not found' }
-
-    // Fetch original lead
-    const oldLead = await prisma.lead.findUnique({
-      where: { id: leadId }
-    })
-    
-    if (!oldLead) return { success: false, error: 'Lead not found' }
-
-    // Fetch new webinar name
-    const newWebinar = await prisma.webinarMaster.findUnique({
-      where: { id: newWebinarId }
-    })
-    const newWebinarName = newWebinar ? newWebinar.name : null
-
-    // Generate new uniqueId
-    let uniqueId = ''
-
-    if (newWebinarName || newWebinarId) {
-      let prefix = 'WEB-01'
-      let nextNum = 1
-
-      const existingWebinarLead = await prisma.lead.findFirst({
-        where: { 
-          OR: [
-            ...(newWebinarId ? [{ webinarId: newWebinarId }] : []),
-            ...(newWebinarName ? [{ webinarName: newWebinarName }] : [])
-          ], 
-          uniqueId: { startsWith: 'WEB-' } 
-        },
-        orderBy: { createdAt: 'desc' }
-      })
-
-      if (existingWebinarLead) {
-        const parts = existingWebinarLead.uniqueId.split('-')
-        if (parts.length === 3) {
-          prefix = `${parts[0]}-${parts[1]}`
-          nextNum = parseInt(parts[2], 10) + 1
-        }
-      } else {
-        const allWebLeads = await prisma.lead.findMany({
-          where: { uniqueId: { startsWith: 'WEB-' } },
-          select: { uniqueId: true }
-        })
-        
-        let maxPrefixNum = 0
-        for (const lead of allWebLeads) {
-          const parts = lead.uniqueId.split('-')
-          if (parts.length >= 2) {
-            const num = parseInt(parts[1], 10)
-            if (!isNaN(num) && num > maxPrefixNum) {
-              maxPrefixNum = num
-            }
-          }
-        }
-        prefix = `WEB-${(maxPrefixNum > 0 ? maxPrefixNum + 1 : 1).toString().padStart(2, '0')}`
-        nextNum = 1
+    await requireLeadAccess(leadId, false);
+    try {
+      const oldLead = await prisma.lead.findUnique({ where: { id: leadId } })
+      if (!oldLead) return { success: false, error: 'Lead not found' }
+      if (oldLead.isTransferred) return { success: false, error: 'This lead has already been transferred' }
+      const newWebinar = await prisma.webinarMaster.findUnique({ where: { id: newWebinarId } })
+      if (!newWebinar) return { success: false, error: 'Select a valid webinar' }
+      if (oldLead.webinarId === newWebinar.id || (!oldLead.webinarId && oldLead.webinarName === newWebinar.name)) {
+        return { success: false, error: 'Select a different webinar' }
       }
-      uniqueId = `${prefix}-${nextNum.toString().padStart(4, '0')}`
-    } else {
-      let nextNum = 1001
-      const lastL = await prisma.lead.findFirst({
-        where: { uniqueId: { startsWith: 'L-' } },
-        orderBy: { createdAt: 'desc' }
-      })
-      if (lastL) {
-        const parts = lastL.uniqueId.split('-')
-        if (parts.length === 2) {
-          nextNum = parseInt(parts[1], 10) + 1
+      const uniqueId = await nextLeadId(newWebinar.id, newWebinar.name)
+      await prisma.lead.create({
+        data: {
+          uniqueId,
+          name: oldLead.name,
+          mobileNumber: oldLead.mobileNumber,
+          email: oldLead.email,
+          webinarId: newWebinar.id,
+          webinarName: newWebinar.name,
+          whatsappJoined: oldLead.whatsappJoined,
+          state: oldLead.state,
+          paymentStatus: oldLead.paymentStatus || 'NO_PAYMENT',
+          leadStatus: 'UNASSIGNED',
+          callStatus: 'UNTOUCHED'
         }
-      }
-      uniqueId = `L-${nextNum}`
+      })
+      await prisma.lead.update({ where: { id: leadId }, data: { leadStatus: 'CLOSED', isTransferred: true } })
+      revalidatePath('/')
+      revalidatePath('/sales')
+      revalidatePath('/recovery')
+      revalidatePath('/webinars')
+      return { success: true }
+    } catch (error) {
+      console.error('Failed to transfer lead to new webinar:', error)
+      return { success: false, error: 'Failed to transfer lead. Please try again.' }
     }
-
-    // Create new lead
-    await prisma.lead.create({
-      data: {
-        uniqueId,
-        name: oldLead.name,
-        mobileNumber: oldLead.mobileNumber,
-        email: oldLead.email,
-        webinarId: newWebinarId,
-        webinarName: newWebinarName || oldLead.webinarName,
-        whatsappJoined: oldLead.whatsappJoined,
-        state: oldLead.state,
-        paymentStatus: oldLead.paymentStatus || 'NO_PAYMENT',
-        // Reset everything else (unassigned, fresh status)
-        leadStatus: 'UNASSIGNED',
-        callStatus: 'UNTOUCHED'
-      }
-    })
-
-    // Close the old lead and mark it as transferred
-    await prisma.lead.update({
-      where: { id: leadId },
-      data: { 
-        leadStatus: 'CLOSED',
-        isTransferred: true
-      }
-    })
-
-    return { success: true }
-  } catch (error) {
-    console.error('Failed to transfer lead to new webinar:', error)
-    return { success: false, error: (error instanceof Error ? error.message : String(error)) || 'Failed to transfer lead' }
-  }
-
   });
 }

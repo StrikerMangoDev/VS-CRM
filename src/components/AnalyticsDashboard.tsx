@@ -212,7 +212,7 @@ const LeadTable = ({ leads, query, initialPage, setEditingLead }: { leads: LeadM
 
 CustomDateInput.displayName = 'CustomDateInput';
 
-export default function AnalyticsDashboard({ leads, leadQuery={sheet:'ANALYTICS'}, initialPage, executives = [], userRole = 'ADMIN', onUpdate, dropdowns = {} }: { leads: LeadMetrics[], leadQuery?: LeadQuery, initialPage?: LeadPage, executives?: Person[], userRole?: string, currentUser?: DashboardUser, onUpdate?: () => void, dropdowns?: Record<string, string[]> }) {
+export default function AnalyticsDashboard({ leads, leadQuery={sheet:'ANALYTICS'}, initialPage, executives = [], userRole = 'ADMIN', currentUser, onUpdate, dropdowns = {} }: { leads: LeadMetrics[], leadQuery?: LeadQuery, initialPage?: LeadPage, executives?: Person[], userRole?: string, currentUser?: DashboardUser, onUpdate?: () => void, dropdowns?: Record<string, string[]> }) {
 
   // Role verification
   const isExecutive = userRole === 'EXEC'
@@ -832,6 +832,8 @@ export default function AnalyticsDashboard({ leads, leadQuery={sheet:'ANALYTICS'
       {editingLead && (
         <EditLeadModal
           lead={editingLead}
+          updaterDepartment={currentUser?.role === 'EXEC' ? currentUser.department : (leadQuery.sheet === 'RECOVERY' ? 'RECOVERY' : 'SALES')}
+          isAdmin={userRole === 'ADMIN'}
           onClose={() => setEditingLead(null)}
           onSaveSuccess={() => {
             if (onUpdate) onUpdate();

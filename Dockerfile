@@ -8,11 +8,15 @@ COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN DATABASE_URL=postgresql://build:build@127.0.0.1:5432/vscrm_build npm ci
 COPY . .
-RUN DATABASE_URL=postgresql://build:build@127.0.0.1:5432/vscrm_build npm run build
+ARG DEPLOYMENT_ID
+ENV NEXT_DEPLOYMENT_ID=${DEPLOYMENT_ID}
+RUN test -n "$NEXT_DEPLOYMENT_ID" && DATABASE_URL=postgresql://build:build@127.0.0.1:5432/vscrm_build npm run build
 RUN rm -rf .next/cache
 
 FROM base
 WORKDIR /app
+ARG DEPLOYMENT_ID
+ENV NEXT_DEPLOYMENT_ID=${DEPLOYMENT_ID}
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000
 COPY --from=build --chown=node:node /app/package.json /app/next.config.ts /app/prisma.config.ts ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules

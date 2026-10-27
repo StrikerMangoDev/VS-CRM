@@ -2,6 +2,7 @@
 
 import React,{ useState,useEffect,useCallback } from 'react'
 import { updateLeadCompleteAction } from '@/app/actions/lead'
+import { actionErrorMessage } from '@/lib/action-error'
 import { MessageSquare,Send,Check } from 'lucide-react'
 import { getWhatsAppTemplatesAction,updateLeadWhatsAppTemplateAction } from '@/app/actions/whatsappTemplate'
 
@@ -130,9 +131,10 @@ export default function EditLeadModal({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSaving(true)
+    let savedLead: Awaited<ReturnType<typeof updateLeadCompleteAction>>
     
     try {
-      await updateLeadCompleteAction(lead.id, {
+      savedLead = await updateLeadCompleteAction(lead.id, {
         callStatus: formData.callStatus,
         nextFollowUpDate: formData.nextFollowUpDate ? new Date(formData.nextFollowUpDate) : null,
         remark1: formData.remark1,
@@ -147,27 +149,19 @@ export default function EditLeadModal({
         whatsappTemplate: selectedTemplateName || null
       })
       
-      // Show success message
-      alert('Lead updated successfully.')
-      
-      // Update local state and close
-      onSaveSuccess({
-        ...formData,
-        id: lead.id,
-        whatsappTemplate: selectedTemplateName || null,
-        whatsappSentAt: whatsappSentAt ? new Date(whatsappSentAt) : null,
-        nextFollowUpDate: formData.nextFollowUpDate ? new Date(formData.nextFollowUpDate) : null,
-        amount1: formData.amount1 ? Number(formData.amount1) : null,
-        amount2: formData.amount2 ? Number(formData.amount2) : null,
-        amount3: formData.amount3 ? Number(formData.amount3) : null,
-        discount: formData.discount ? Number(formData.discount) : null,
-        totalPayment: (lead.partPaymentAmount || 0) + (lead.fullPaymentAmount || 0) + (Number(formData.amount1) || 0) + (Number(formData.amount2) || 0) + (Number(formData.amount3) || 0)
-      })
     } catch (err) {
       console.error(err)
-      alert('Failed to save changes.')
+      alert(actionErrorMessage(err, 'Failed to save changes.'))
+      return
     } finally {
       setIsSaving(false)
+    }
+    try {
+      onSaveSuccess(savedLead)
+      alert('Lead updated successfully.')
+    } catch (err) {
+      console.error(err)
+      alert('Lead saved successfully. Refresh the page to see the updated details.')
     }
   }
 
