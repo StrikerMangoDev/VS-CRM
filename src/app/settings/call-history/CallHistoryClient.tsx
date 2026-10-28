@@ -286,7 +286,7 @@ function CallHistoryContent({ initialPage, isAdmin }: { initialPage: CallPage, i
                   <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                     {new Date(call.createdAt).toLocaleString('en-IN', {
                       day: '2-digit', month: 'short', year: 'numeric',
-                      hour: '2-digit', minute: '2-digit', hour12: true
+                      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
                     })}
                   </td>
                   <td style={{ padding: '12px 16px', color: '#d8b4fe', fontSize: '0.9rem', fontWeight: 600 }}>

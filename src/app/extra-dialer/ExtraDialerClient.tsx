@@ -355,7 +355,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
                   return (
                     <tr key={call.id} style={{ borderBottom: '1px solid var(--card-border)' }}>
                       <td style={{ padding: '12px 16px', color: 'var(--text-primary)', fontSize: '0.9rem' }}>
-                        {new Date(call.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {new Date(call.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}
                       </td>
                       <td style={{ padding: '12px 16px', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 500 }}>
                         {lead.mobileNumber}
@@ -378,13 +378,13 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
                       <td style={{ padding: '12px 16px', color: 'var(--text-primary)', fontSize: '0.9rem' }}>
                         {lead.nextFollowUpDate ? (() => {
                           const fd = new Date(lead.nextFollowUpDate);
-                          return `${fd.getDate().toString().padStart(2, '0')}/${(fd.getMonth() + 1).toString().padStart(2, '0')}/${fd.getFullYear()} ${fd.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+                          return `${fd.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' })} ${fd.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`;
                         })() : '-'}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         {(() => {
                           const d = new Date(call.createdAt);
-                          const dateStr = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+                          const dateStr = `${d.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' })} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`;
                           return (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                               <span style={{ 
