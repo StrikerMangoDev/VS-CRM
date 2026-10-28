@@ -1,6 +1,8 @@
 'use client'
 import BodyPortal from '@/components/BodyPortal'
 import { useInfinitePage } from '@/hooks/use-lead-page'
+import { useEditableRows } from '@/hooks/use-editable-rows'
+import { useCallRecordings } from '@/hooks/use-call-recordings'
 import { getCallPage,getCallLeadQueue } from '@/app/actions/lead-query'
 import { getLeadHistoryAction,getCallLogsAction } from '@/app/actions/lead'
 import type { CallPage,CallQuery } from '@/lib/call-query'
@@ -32,6 +34,9 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
   const [today]=useState(()=>{const d=new Date();d.setHours(0,0,0,0);return d.toISOString()})
   const callQuery:CallQuery={mode:'DIALER',search:searchFilter,status:statusFilter,leadStatus:leadStatusFilter,follow:followUpFilter,lastCall:lastCallFilter,today,size:50}
   const [pageData,sentinel]=useInfinitePage(initialPage,callQuery,getCallPage)
+  const [calls,setCalls]=useEditableRows(pageData.rows)
+  useCallRecordings(calls, call => setCalls(rows => rows.map(row => row.id === call.id ? { ...row, ...call } : row)))
+  useCallRecordings(historyLead?.callRecords || [], call => setHistoryLead(lead => lead ? { ...lead, callRecords: lead.callRecords.map(row => row.id === call.id ? { ...row, ...call } : row) } : lead))
   const [dialerQueue,setDialerQueue]=useState<LeadRow[]>([])
   async function openHistory(lead:import('@prisma/client').Lead){try{const [callRecords,auditLogs]=await Promise.all([getCallLogsAction(lead.id),getLeadHistoryAction(lead.id)]);setHistoryLead({...lead,assignments:[],callRecords,auditLogs})}catch{toast.error('Unable to load lead history')}}
 
@@ -220,7 +225,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
     }
   }
 
-  const filteredCalls=pageData.rows
+  const filteredCalls=calls
   const uniqueLeadsForDialer=dialerQueue.map(lead=>({...lead,...dialerDrafts[lead.id]}))
 
   return (

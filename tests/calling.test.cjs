@@ -205,3 +205,43 @@ test('an old lost initiation response cannot block calling forever once the agen
  assert.equal((await db.callRecord.findUnique({where:{id:unknown.id}})).status,'AWAITING_RESULT')
  assert.equal(requests.filter(request=>request.body).length,2)
 })
+
+test('completed calls pick up recordings published after the final result, including a cached not-ready check',async t=>{
+ const value=await start();records.set(value.ref,[{...final(value.ref,'answered',31),recording_url:null}])
+ const saved=await run('actor',()=>actions.saveCallLogAction({leadId:value.lead.id,refId:value.ref,duration:0}))
+ assert.equal(saved.callRecord.status,'COMPLETED');assert.equal(saved.callRecord.recordingUrl,null)
+ const history=()=>run('actor',()=>load('src/app/actions/lead-query.ts').getCallPage({mode:'HISTORY'}))
+ assert.equal((await history()).rows[0].recordingUrl,null)
+ const waiting=await run('actor',()=>actions.fetchCallRecordingAction(value.ref))
+ assert.match(waiting.error,/5–10 minutes/);assert.equal(waiting.callRecord.duration,31)
+ records.set(value.ref,[final(value.ref,'answered',31)])
+ t.mock.timers.enable({apis:['Date'],now:Date.now()+31000})
+ const page=await history();assert.ok(page.rows[0].recordingUrl);assert.equal(page.rows[0].duration,31)
+ assert.ok((await run('actor',()=>load('src/app/actions/lead.ts').getCallLogsAction(value.lead.id)))[0].recordingUrl)
+})
+
+test('simultaneous recording retries share one provider request and retain caller authorization',async()=>{
+ const value=await start();records.set(value.ref,[{...final(value.ref),recording_url:null}])
+ await run('actor',()=>actions.saveCallLogAction({leadId:value.lead.id,refId:value.ref,duration:0}))
+ records.set(value.ref,[final(value.ref)]);requests=[]
+ const results=await Promise.all([1,2,3].map(()=>run('actor',()=>actions.fetchCallRecordingAction(value.ref))))
+ assert.ok(results.every(result=>result.success&&result.callRecord.recordingUrl))
+ assert.equal(requests.length,1)
+ await assert.rejects(()=>run('other',()=>actions.fetchCallRecordingAction(value.ref)),/Forbidden/)
+ assert.equal(requests.length,1)
+})
+
+test('automatic recording refresh is bounded; older recordings still support explicit fetching',async()=>{
+ const row=await lead(),refs=Array.from({length:5},()=>randomUUID())
+ await db.callRecord.createMany({data:refs.map(ref=>({leadId:row.id,userId:actor.id,smartfloRefId:ref,status:'COMPLETED',duration:0}))})
+ for(const ref of refs)records.set(ref,[final(ref,'missed',0)])
+ await run('actor',()=>load('src/app/actions/lead-query.ts').getCallPage({mode:'HISTORY'}))
+ assert.equal(requests.length,3)
+ const oldRef=randomUUID()
+ await db.callRecord.create({data:{leadId:row.id,userId:actor.id,smartfloRefId:oldRef,status:'COMPLETED',duration:15,createdAt:new Date(Date.now()-7200000)}})
+ records.set(oldRef,[final(oldRef,'answered',15)])
+ const logs=await run('actor',()=>load('src/app/actions/lead.ts').getCallLogsAction(row.id))
+ assert.equal(logs.find(call=>call.smartfloRefId===oldRef).recordingUrl,null)
+ const fetched=await run('actor',()=>actions.fetchCallRecordingAction(oldRef))
+ assert.ok(fetched.success);assert.equal(fetched.callRecord.duration,15)
+})

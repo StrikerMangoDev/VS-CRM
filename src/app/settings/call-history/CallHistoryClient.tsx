@@ -1,6 +1,7 @@
 'use client'
 import { useInfinitePage,dateBounds } from '@/hooks/use-lead-page'
 import { useEditableRows } from '@/hooks/use-editable-rows'
+import { useCallRecordings } from '@/hooks/use-call-recordings'
 import { getCallPage } from '@/app/actions/lead-query'
 import type { CallPage } from '@/lib/call-query'
 
@@ -28,6 +29,7 @@ function CallHistoryContent({ initialPage, isAdmin }: { initialPage: CallPage, i
   const [selectedCaller, setSelectedCaller] = useState<string>('ALL')
   const [pageData,sentinel]=useInfinitePage(initialPage,{mode:'HISTORY' as const,search:searchTerm,caller:selectedCaller,...dateBounds('custom',startDate,endDate||startDate),size:50},getCallPage)
   const [calls,setCalls]=useEditableRows(pageData.rows)
+  useCallRecordings(calls, call => setCalls(rows => rows.map(row => row.id === call.id ? { ...row, ...call } : row)))
   const [fetchingId, setFetchingId] = useState<string | null>(null)
 
 

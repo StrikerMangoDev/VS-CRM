@@ -84,7 +84,8 @@ export async function fetchCallRecordingAction(refId: string) {
   if (actor.role === 'EXEC' && call.userId !== actor.id) throw new Error('Forbidden')
   try {
     const result = await refreshStoredCall(call)
-    return result.call.recordingUrl ? { success: true, url: result.call.recordingUrl } : { error: 'Recording is not ready yet. Try again in a few minutes.' }
+    const callRecord = { id: result.call.id, status: result.call.status, duration: result.call.duration, recordingUrl: result.call.recordingUrl }
+    return result.call.recordingUrl ? { success: true, url: result.call.recordingUrl, callRecord } : { error: 'Smartflo is still processing this recording. Call data usually takes 5–10 minutes after the call ends.', callRecord }
   } catch (error) { return { error: error instanceof Error ? error.message : 'Failed to fetch recording from Smartflo' } }
 }
 

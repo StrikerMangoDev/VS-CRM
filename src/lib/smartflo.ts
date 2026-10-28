@@ -4,8 +4,9 @@ import { prisma } from './prisma'
 type ProviderRecord = Record<string, unknown>
 const callerIds = ['917969081999', '917969081998', '917969081997', '917969081996', '917969081995', '917969081994', '917969081993', '917969081992', '917969081991']
 export const pendingCallStatuses = ['INITIATING', 'RINGING', 'ACTIVE', 'UNKNOWN']
-const providerQueue = globalThis as unknown as { smartfloRequestTurn?: Promise<void>; smartfloAbsentCalls?: Map<string, number>; smartfloLiveSnapshot?: { token?: string; expiresAt: number; value: Promise<ProviderRecord[]> } }
+const providerQueue = globalThis as unknown as { smartfloRequestTurn?: Promise<void>; smartfloAbsentCalls?: Map<string, number>; smartfloLiveSnapshot?: { token?: string; expiresAt: number; value: Promise<ProviderRecord[]> }; smartfloRecordingChecks?: Map<string, { expiresAt: number; result: Promise<Awaited<ReturnType<typeof reconcileStoredCall>>> }> }
 const absentCalls = providerQueue.smartfloAbsentCalls ??= new Map<string, number>()
+const recordingChecks = providerQueue.smartfloRecordingChecks ??= new Map()
 
 async function request(path: string, body?: ProviderRecord, retry = 0): Promise<unknown> {
   const token = process.env.SMARTFLO_API_TOKEN
@@ -79,6 +80,18 @@ export async function smartfloLiveCalls(refId?: string) {
 }
 
 export async function refreshStoredCall(call: CallRecord) {
+  if (call.status !== 'COMPLETED' || call.recordingUrl) return reconcileStoredCall(call)
+  const now = Date.now(), cached = recordingChecks.get(call.id)
+  if (cached && cached.expiresAt > now) return cached.result
+  for (const [id, entry] of recordingChecks) if (entry.expiresAt <= now) recordingChecks.delete(id)
+  // Recording publication can lag behind the final CDR; share retries across open views.
+  const entry = { expiresAt: Infinity, result: reconcileStoredCall(call) }
+  recordingChecks.set(call.id, entry)
+  void entry.result.then(() => { entry.expiresAt = Date.now() + 30000 }, () => { recordingChecks.delete(call.id) })
+  return entry.result
+}
+
+async function reconcileStoredCall(call: CallRecord) {
   const pending = pendingCallStatuses.includes(call.status)
   if (!process.env.SMARTFLO_API_TOKEN || /^(manual_|local_)/.test(call.smartfloRefId)) return { call, complete: !pending, recheckAfterMs: 0 }
   if (!pending && call.status !== 'AWAITING_RESULT' && call.recordingUrl) return { call, complete: true, recheckAfterMs: 0 }
@@ -121,6 +134,8 @@ export async function refreshStoredCall(call: CallRecord) {
 
 export async function refreshPendingCalls(calls: CallRecord[]) {
   const pending = calls.filter(call => pendingCallStatuses.includes(call.status) || call.status === 'AWAITING_RESULT')
+  const missingRecordings = calls.filter(call => call.status === 'COMPLETED' && !call.recordingUrl && Date.now() - call.createdAt.getTime() < 3600000 && (recordingChecks.get(call.id)?.expiresAt || 0) <= Date.now()).slice(0, 3)
+  pending.push(...missingRecordings)
   // Limit concurrent provider reads when a user returns after closing a calling tab.
   for (let index = 0; index < pending.length; index += 4) await Promise.all(pending.slice(index, index + 4).map(call => refreshStoredCall(call).catch(() => null)))
   return pending.length > 0

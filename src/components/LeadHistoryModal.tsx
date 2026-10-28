@@ -4,6 +4,7 @@ import { useState,useEffect } from 'react'
 import { getLeadHistoryAction,getCallLogsAction } from '@/app/actions/lead'
 import { fetchCallRecordingAction } from '@/app/actions/call'
 import { format } from 'date-fns'
+import { useCallRecordings } from '@/hooks/use-call-recordings'
 
 export default function LeadHistoryModal({
   lead,
@@ -17,6 +18,7 @@ export default function LeadHistoryModal({
   const [callLogs, setCallLogs] = useState<Awaited<ReturnType<typeof getCallLogsAction>>>([])
   const [isLoading, setIsLoading] = useState(true)
   const [fetchingRecordingId, setFetchingRecordingId] = useState<string | null>(null)
+  useCallRecordings(activeTab === 'calls' ? callLogs : [], call => setCallLogs(rows => rows.map(row => row.id === call.id ? { ...row, ...call } : row)))
 
   useEffect(() => {
     const fetchData = async () => {
