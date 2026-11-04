@@ -127,9 +127,9 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
         editorId: record.editorId || '',
         graphicDesignerId: record.graphicDesignerId || '',
         doneDate: record.doneDate ? new Date(new Date(record.doneDate).getTime() - new Date(record.doneDate).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '',
-        approvalDate: record.approvalDate ? new Date(record.approvalDate).toISOString().split('T')[0] : '',
-        postOnDate: record.postOnDate ? new Date(record.postOnDate).toISOString().split('T')[0] : '',
-        uploadingDate: record.uploadingDate ? new Date(record.uploadingDate).toISOString().split('T')[0] : '',
+        approvalDate: record.approvalDate ? new Date(new Date(record.approvalDate).getTime() - new Date(record.approvalDate).getTimezoneOffset() * 60000).toISOString().split('T')[0] : '',
+        postOnDate: record.postOnDate ? new Date(new Date(record.postOnDate).getTime() - new Date(record.postOnDate).getTimezoneOffset() * 60000).toISOString().split('T')[0] : '',
+        uploadingDate: record.uploadingDate ? new Date(new Date(record.uploadingDate).getTime() - new Date(record.uploadingDate).getTimezoneOffset() * 60000).toISOString().split('T')[0] : '',
         thumbnailDoneDate: record.thumbnailDoneDate ? new Date(new Date(record.thumbnailDoneDate).getTime() - new Date(record.thumbnailDoneDate).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : (isThumbnailSheet ? new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''),
       });
     } else {
@@ -159,7 +159,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
     
     if (formData.uploadingStatus === 'Scheduled') {
       const now = new Date();
-      const nowISOString = now.toISOString().split('T')[0];
+      const nowISOString = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().split('T')[0];
       const nowTimeStr = now.toTimeString().split(' ')[0].substring(0, 5);
       
       if (!formData.uploadingDate || formData.uploadingDate < nowISOString) {
@@ -1176,8 +1176,9 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                           const val = e.target.value;
                           const updates: Partial<typeof formData> = { approvalStatus: val };
                           if (val === 'Approved' || val === 'Rejected' || val === 'Thumbnail Revision' || val === 'Video Revision' || val === 'Video and Thumbnail Revision') {
+                            const now = new Date();
                             updates.approvedById = currentUserId || '';
-                            updates.approvalDate = new Date().toISOString().split('T')[0];
+                            updates.approvalDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().split('T')[0];
                           } else if (val === 'Pending') {
                             updates.approvedById = '';
                             updates.approvalDate = '';
@@ -1233,7 +1234,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                           const updates: Partial<typeof formData> = { uploadingStatus: newStatus };
                           if (newStatus === 'Uploaded') {
                             const now = new Date();
-                            updates.uploadingDate = now.toISOString().split('T')[0];
+                            updates.uploadingDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().split('T')[0];
                             updates.uploadingTime = now.toTimeString().split(' ')[0].substring(0, 5);
                             updates.postedById = currentUserId;
                           } else if (newStatus === 'Scheduled') {
@@ -1279,7 +1280,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                       <input 
                         type="date" 
                         disabled={formData.uploadingStatus === 'Uploaded'}
-                        min={formData.uploadingStatus === 'Scheduled' ? new Date().toISOString().split('T')[0] : undefined}
+                        min={formData.uploadingStatus === 'Scheduled' ? new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0] : undefined}
                         value={formData.uploadingDate || ''} 
                         onChange={(e) => setFormData({...formData, uploadingDate: e.target.value})} 
                         style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--card-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--text-primary)' , opacity: (isManagerRestricted || formData.uploadingStatus === 'Uploaded') ? 0.7 : 1, cursor: (isManagerRestricted || formData.uploadingStatus === 'Uploaded') ? 'not-allowed' : 'pointer' }} 

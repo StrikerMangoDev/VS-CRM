@@ -142,8 +142,24 @@ export async function getContentRecords(channel: string) {
 
 const safeDate = (d: string | Date | null | undefined) => {
   if (!d) return null;
-  const parsed = new Date(d);
-  return isNaN(parsed.getTime()) ? null : parsed;
+  if (d instanceof Date) return isNaN(d.getTime()) ? null : d;
+  if (typeof d === 'string') {
+    const trimmed = d.trim();
+    if (!trimmed) return null;
+    // Datetime without timezone offset (e.g. from <input type="datetime-local"> like "2026-11-04T21:34" or "2026-11-04T21:34:00")
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/.test(trimmed)) {
+      const parsedWithIST = new Date(`${trimmed}+05:30`);
+      return isNaN(parsedWithIST.getTime()) ? null : parsedWithIST;
+    }
+    // Date only without timezone (e.g. from <input type="date"> like "2026-11-04")
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const parsedDate = new Date(`${trimmed}T00:00:00+05:30`);
+      return isNaN(parsedDate.getTime()) ? null : parsedDate;
+    }
+    const parsed = new Date(trimmed);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
 };
 
 const revalidateAllContentPaths = () => {
