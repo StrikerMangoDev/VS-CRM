@@ -58,6 +58,8 @@ async function main() {
     const portal=await db.orgModule.create({data:{name:'E2E Portal',departmentId:department.id,allowedTeams:{connect:{id:team.id}}}})
     const pagination=require('./pagination-browser.cjs')
     const paginationFixture=await pagination.seed(db,actors,webinar,portal,tag)
+    const postingTopic='Scheduling E2E '+tag
+    await db.contentRecord.create({data:{uniqueId:'SCHEDULE-'+tag,topic:postingTopic,platform:'YouTube',format:'Long Video',channel:'VS Channel',approvalStatus:'Approved',postOnDate:new Date(),editorId:actors.editor.id}})
     server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','4319'],{
       stdio:['ignore','pipe','pipe'],env:{...process.env,DATABASE_URL:url.toString(),DIRECT_URL:'',APP_URL:'http://127.0.0.1:4319',NEXT_TELEMETRY_DISABLED:'1',SMTP_HOST:'127.0.0.1',SMTP_PORT:'4321',SMTP_FROM:'test@example.invalid',SMTP_REQUIRE_TLS:'false',SMTP_USER:'',SMTP_PASSWORD:'',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',GOOGLE_REFRESH_TOKEN:'',GOOGLE_DRIVE_FOLDER_ID:'',SMARTFLO_API_TOKEN:''},
     })
@@ -109,6 +111,17 @@ async function main() {
         const html=await p.content()
         assert.ok(!html.includes(hash),'Password hash leaked into browser')
         results.push(key+' '+route+': PASS')
+        if(key==='posting'&&route==='/social-media/posting-sheet'){
+          await p.getByRole('row').filter({hasText:postingTopic}).getByTitle('Edit',{exact:true}).click()
+          const status=p.locator('#contentForm select').filter({has:p.locator('option[value=Scheduled]')})
+          await status.selectOption('Scheduled')
+          const date=p.locator('label').filter({hasText:/^Uploading Date$/}).locator('..').locator('input')
+          const today=await p.evaluate(()=>{const now=new Date();return new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().split('T')[0]})
+          assert.equal(await date.getAttribute('min'),today)
+          await status.selectOption('Pending');assert.equal(await date.getAttribute('min'),null)
+          await p.getByRole('button',{name:'Cancel',exact:true}).click()
+          results.push('posting schedule minimum date uses the local calendar day only when scheduled: PASS')
+        }
         if(key==='admin'&&route==='/incentives'){
           const row=p.getByRole('row').filter({hasText:actors.sales.name})
           await row.waitFor()

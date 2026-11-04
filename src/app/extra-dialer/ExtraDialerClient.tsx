@@ -54,7 +54,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
   const [callStatusMessage, setCallStatusMessage] = useState('')
   const [callDuration, setCallDuration] = useState<number>(0)
   const [isCallConnected, setIsCallConnected] = useState(false)
-  const [hasCallBeenLive, setHasCallBeenLive] = useState(false)
+  const [, setHasCallBeenLive] = useState(false)
   const [callRefId, setCallRefId] = useState<string | null>(null)
   const latestCallRef = React.useRef<string | null>(null)
   React.useEffect(() => { latestCallRef.current = callRefId }, [callRefId])

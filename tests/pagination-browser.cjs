@@ -102,8 +102,11 @@ exports.check=async function({browser,db,actors,webinar,portal,department,fixtur
     results.push('manual dialer pages all call records and retains the complete calling queue: PASS')
     await goto(s,'/settings/call-history')
     await s.getByPlaceholder('Search lead ID, number, or caller...').fill(fixture.dialPrefix)
-    await expect(matching(s,fixture.dialer.mobileNumber)).toHaveCount(50)
-    await more(s);await expect(matching(s,fixture.dialer.mobileNumber)).toHaveCount(65)
+    // The visible scroll sentinel can fetch the next page before the assertion runs.
+    await expect.poll(()=>matching(s,fixture.dialer.mobileNumber).count()).toBeGreaterThanOrEqual(50)
+    assert.ok([50,65].includes(await matching(s,fixture.dialer.mobileNumber).count()))
+    if(await matching(s,fixture.dialer.mobileNumber).count()===50)await more(s)
+    await expect(matching(s,fixture.dialer.mobileNumber)).toHaveCount(65)
     results.push('call-history search and scrolling reach every matching call: PASS')
   }finally{await sales.close()}
   const {context:tech,page:t}=await contextFor(actors.tech)

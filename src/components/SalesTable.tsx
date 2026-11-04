@@ -56,7 +56,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
   const [callStatusMessage, setCallStatusMessage] = useState('')
   const [callDuration, setCallDuration] = useState<number>(0)
   const [isCallConnected, setIsCallConnected] = useState(false)
-  const [hasCallBeenLive, setHasCallBeenLive] = useState(false)
+  const [, setHasCallBeenLive] = useState(false)
   const [callRefId, setCallRefId] = useState<string | null>(null)
   const latestCallRef = useRef<string | null>(null)
   useEffect(() => { latestCallRef.current = callRefId }, [callRefId])

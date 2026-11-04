@@ -26,6 +26,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
   const [dynamicChannelsList, setDynamicChannelsList] = useState<import('@prisma/client').SocialMediaChannel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [minimumUploadDate, setMinimumUploadDate] = useState('');
   const [editingRecord, setEditingRecord] = useState<import('@/lib/view-types').ContentView | null>(null);
   
   // Filters
@@ -101,6 +102,8 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
 
 
   const handleOpenModal = (record:import('@/lib/view-types').ContentView | null = null) => {
+    const today = new Date();
+    setMinimumUploadDate(new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().split('T')[0]);
     if (record) {
       setEditingRecord(record);
       setFormData({
@@ -1238,6 +1241,8 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                             updates.uploadingTime = now.toTimeString().split(' ')[0].substring(0, 5);
                             updates.postedById = currentUserId;
                           } else if (newStatus === 'Scheduled') {
+                            const now = new Date();
+                            setMinimumUploadDate(new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().split('T')[0]);
                             updates.postedById = currentUserId;
                           }
                           setFormData({...formData, ...updates});
@@ -1280,7 +1285,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                       <input 
                         type="date" 
                         disabled={formData.uploadingStatus === 'Uploaded'}
-                        min={formData.uploadingStatus === 'Scheduled' ? new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0] : undefined}
+                        min={formData.uploadingStatus === 'Scheduled' ? minimumUploadDate : undefined}
                         value={formData.uploadingDate || ''} 
                         onChange={(e) => setFormData({...formData, uploadingDate: e.target.value})} 
                         style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--card-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--text-primary)' , opacity: (isManagerRestricted || formData.uploadingStatus === 'Uploaded') ? 0.7 : 1, cursor: (isManagerRestricted || formData.uploadingStatus === 'Uploaded') ? 'not-allowed' : 'pointer' }} 
