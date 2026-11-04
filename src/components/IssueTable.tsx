@@ -1,7 +1,7 @@
 'use client';
 import BodyPortal from '@/components/BodyPortal'
 
-import { useState,useEffect,useCallback } from 'react';
+import { useState,useEffect,useCallback,useRef } from 'react';
 import { Plus,X,UserCheck,Edit2,PhoneCall,PhoneOff } from 'lucide-react';
 import { initiateIssueCallAction,checkCallStatusAction,saveCallLogAction } from '@/app/actions/call';
 
@@ -35,6 +35,8 @@ export default function IssueTable({ isTechnicalQueue = false, userRole, userId 
   const [isCallConnected, setIsCallConnected] = useState(false);
   const [, setHasCallBeenLive] = useState(false);
   const [callRefId, setCallRefId] = useState<string | null>(null);
+  const callDurationRef = useRef(0);
+  useEffect(() => { callDurationRef.current = callDuration }, [callDuration]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -47,31 +49,64 @@ export default function IssueTable({ isTechnicalQueue = false, userRole, userId 
   }, [isCallConnected]);
 
   useEffect(() => {
-    if (!isCallConnected || callDuration === 0) return;
-    
-    if (callDuration % 5 === 0) {
-      checkCallStatusAction().then(status => {
+    if (!isCalling || !callRefId) return;
+
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      if (cancelled) return;
+      const ref = callRefId;
+      try {
+        const status = await checkCallStatusAction(ref);
+        if (cancelled) return;
+
         if (status.active) {
-          setHasCallBeenLive(true);
+          if (status.live) {
+            setIsCallConnected(true);
+            setHasCallBeenLive(true);
+            setCallStatusMessage('Call in progress');
+          } else {
+            setCallStatusMessage('Ringing your phone... Please answer');
+          }
         } else {
-          setHasCallBeenLive(currentHasLive => {
-            if (currentHasLive || callDuration > 15) {
-              setIsCallConnected(false);
-              setCallStatusMessage('Call Disconnected');
-              if (activeCallIssue && callRefId) {
-                saveCallLogAction({
-                  leadId: activeCallIssue.id,
-                  refId: callRefId,
-                  duration: callDuration
-                }).catch(() => {});
+          // Call ended
+          setIsCallConnected(false);
+          clearInterval(interval);
+
+          const finalDuration = typeof status.duration === 'number' ? status.duration : callDurationRef.current;
+          if (activeCallIssue && ref) {
+            try {
+              const result = await saveCallLogAction({
+                leadId: activeCallIssue.id,
+                refId: ref,
+                duration: finalDuration
+              });
+              if (cancelled) return;
+              if (result.success && result.callRecord) {
+                setCallStatusMessage(result.callStatus === 'CALL_CONNECTED' ? `Call Completed (${result.callRecord.duration}s)` : 'Call Missed / Not Answered');
               }
+            } catch {
+              // ignore
             }
-            return currentHasLive;
-          });
+          }
+
+          setTimeout(() => {
+            if (cancelled) return;
+            setActiveCallIssue(null);
+            setIsCalling(false);
+            setCallDuration(0);
+            setCallRefId(null);
+          }, 2500);
         }
-      }).catch(() => {});
-    }
-  }, [callDuration, isCallConnected, activeCallIssue, callRefId]);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isCalling, callRefId, activeCallIssue]);
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -335,13 +370,23 @@ export default function IssueTable({ isTechnicalQueue = false, userRole, userId 
                         setHasCallBeenLive(false);
                         setCallStatusMessage('Initiating call...');
                         initiateIssueCallAction(issue.id).then(res => {
-                          if (res.error) setCallStatusMessage(res.error);
-                          else { 
+                          if (res.error) {
+                            setCallStatusMessage(res.error);
+                            setTimeout(() => {
+                              setIsCalling(false);
+                              setActiveCallIssue(null);
+                            }, 3000);
+                          } else { 
                             if (res.ref_id) setCallRefId(res.ref_id);
-                            setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
-                            setIsCallConnected(true);
+                            setCallStatusMessage('Calling your phone... Please answer');
                           }
-                        }).catch(() => setCallStatusMessage('Failed to initiate call.'));
+                        }).catch(() => {
+                          setCallStatusMessage('Failed to initiate call.');
+                          setTimeout(() => {
+                            setIsCalling(false);
+                            setActiveCallIssue(null);
+                          }, 3000);
+                        });
                       }}
                       style={{ 
                         padding: '4px 6px', 

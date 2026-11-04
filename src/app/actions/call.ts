@@ -44,18 +44,21 @@ export async function checkCallStatusAction(refId?: string) {
     if (!call || call.userId !== user.id) throw new Error('Forbidden')
     try {
       const current = await refreshStoredCall(call)
-      if (current.complete) return { active: false, duration: current.call.duration }
+      if (current.complete) {
+        return { active: false, live: false, duration: current.call.duration, status: current.call.status }
+      }
       // An absent live-call row can mean ringing or reporting lag, not a hangup.
-      return { active: true }
-    } catch { return { active: true, error: 'Call status is temporarily unavailable. The phone call has not been ended.' } }
+      return { active: true, live: current.call.status === 'ACTIVE', status: current.call.status }
+    } catch { return { active: true, live: false, error: 'Call status is temporarily unavailable. The phone call has not been ended.' } }
   }
   // Legacy issue calling has no lead call reference; retain its agent-level lookup.
   try {
-    if (!user.mobileNumber) return { active: true }
+    if (!user.mobileNumber) return { active: true, live: false }
     const agent = user.mobileNumber.replace(/\D/g, '').slice(-10)
     const rows = await smartfloLiveCalls()
-    return { active: rows.some(row => [row.source, row.destination].some(value => String(value || '').replace(/\D/g, '').includes(agent))) }
-  } catch { return { active: true } }
+    const isLive = rows.some(row => [row.source, row.destination].some(value => String(value || '').replace(/\D/g, '').includes(agent)))
+    return { active: isLive, live: isLive }
+  } catch { return { active: true, live: false } }
 }
 
 export async function saveCallLogAction(data: { leadId: string; refId: string; duration: number }) {

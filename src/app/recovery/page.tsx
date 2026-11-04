@@ -12,14 +12,15 @@ export default async function RecoveryDashboard({ searchParams }: { searchParams
   const sessionCookie = (await getSessionCookie());
   const user = sessionCookie ? sessionCookie.user : null;
   if (!user) return null;
-  const isAdmin = user?.department === 'ALL';
+  const isAdmin = user?.role === 'ADMIN';
 
   const initialPage=await getLeadPage({sheet:'RECOVERY',closed:isClosed})
   const webinarStats=await getWebinarStats({sheet:'RECOVERY',closed:isClosed})
 
   const allLeadsForDashboard = await prisma.lead.findMany({
     where: { 
-      ...(isAdmin ? { assignments: { some: { user: { department: 'RECOVERY' } } } } : { assignments: { some: { userId: user.id } } })
+      recoveryAssignedAt: { not: null },
+      ...(isAdmin ? { assignments: { some: { OR: [{ user: { department: 'RECOVERY' } }, { user: { role: 'TL' } }] } } } : { assignments: { some: { userId: user.id } } })
     },
     select: dashboardLeadSelect,
     orderBy: { createdAt: 'desc' }

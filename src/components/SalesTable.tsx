@@ -60,6 +60,8 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
   const [callRefId, setCallRefId] = useState<string | null>(null)
   const latestCallRef = useRef<string | null>(null)
   useEffect(() => { latestCallRef.current = callRefId }, [callRefId])
+  const callDurationRef = useRef(0)
+  useEffect(() => { callDurationRef.current = callDuration }, [callDuration])
 
   const [rowsPerPage, setRowsPerPage] = useState(15)
 
@@ -103,66 +105,93 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
   }, [isCallConnected]);
 
   useEffect(() => {
-    if (!isCallConnected || callDuration === 0) return;
-    
-    if (callDuration % 5 === 0) {
-      checkCallStatusAction(callRefId || undefined).then(status => {
-        if (latestCallRef.current !== callRefId) return;
-        if (status.active === true) {
-          setHasCallBeenLive(true);
-        } else if (status.active === false) {
-          // Always save log if it disconnected, even if duration was short
-          setIsCallConnected(false);
-          setCallStatusMessage('Call Disconnected');
-          if (activeCallLead && callRefId) {
-            saveCallLogAction({
-              leadId: activeCallLead.id,
-              refId: callRefId,
-              duration: callDuration
-            }).then(result => {
-              if (latestCallRef.current !== callRefId) return;
-              if (!result.success || !result.callRecord) {toast.error(result.error || 'Failed to save call log');return}
-              const newStatus = result.callStatus;
-              const newCallRecord = result.callRecord;
-              setLocalLeads((prev) => prev.map((l) => {
-                if (l.id === activeCallLead.id) {
-                  return {
-                    ...l,
-                    callStatus: newStatus,
-                    updatedAt: new Date(),
-                    callRecords: [newCallRecord, ...(l.callRecords || []).filter(record => record.id !== newCallRecord.id)]
-                  };
-                }
-                return l;
-              }));
-              setPowerDialerLeads((prev) => prev.map((l) => {
-                if (l.id === activeCallLead.id) {
-                  return {
-                    ...l,
-                    callStatus: newStatus,
-                    updatedAt: new Date(),
-                    callRecords: [newCallRecord, ...(l.callRecords || []).filter(record => record.id !== newCallRecord.id)]
-                  };
-                }
-                return l;
-              }));
-              
-              if (activeCallLead) {
-                setEditingLeadId(activeCallLead.id);
-              }
-            }).catch(() => {});
+    if (!isCalling || !callRefId) return;
+
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      if (cancelled) return;
+      const ref = callRefId;
+      try {
+        const status = await checkCallStatusAction(ref);
+        if (cancelled || latestCallRef.current !== ref) return;
+
+        if (status.active) {
+          if (status.live) {
+            setIsCallConnected(true);
+            setHasCallBeenLive(true);
+            setCallStatusMessage('Call in progress');
+          } else {
+            setCallStatusMessage('Ringing your phone... Please answer');
           }
+        } else {
+          // Call ended
+          setIsCallConnected(false);
+          clearInterval(interval);
+
+          const finalDuration = typeof status.duration === 'number' ? status.duration : callDurationRef.current;
+          if (activeCallLead && ref) {
+            try {
+              const result = await saveCallLogAction({
+                leadId: activeCallLead.id,
+                refId: ref,
+                duration: finalDuration
+              });
+              if (cancelled || latestCallRef.current !== ref) return;
+              if (result.success && result.callRecord) {
+                const newStatus = result.callStatus;
+                const newCallRecord = result.callRecord;
+                setCallStatusMessage(newStatus === 'CALL_CONNECTED' ? `Call Completed (${newCallRecord.duration}s)` : 'Call Missed / Not Answered');
+                setLocalLeads((prev) => prev.map((l) => {
+                  if (l.id === activeCallLead.id) {
+                    return {
+                      ...l,
+                      callStatus: newStatus,
+                      updatedAt: new Date(),
+                      callRecords: [newCallRecord, ...(l.callRecords || []).filter(record => record.id !== newCallRecord.id)]
+                    };
+                  }
+                  return l;
+                }));
+                setPowerDialerLeads((prev) => prev.map((l) => {
+                  if (l.id === activeCallLead.id) {
+                    return {
+                      ...l,
+                      callStatus: newStatus,
+                      updatedAt: new Date(),
+                      callRecords: [newCallRecord, ...(l.callRecords || []).filter(record => record.id !== newCallRecord.id)]
+                    };
+                  }
+                  return l;
+                }));
+                if (activeCallLead) {
+                  setEditingLeadId(activeCallLead.id);
+                }
+              } else if (result.error) {
+                toast.error(result.error);
+              }
+            } catch {
+              // ignore
+            }
+          }
+
           setTimeout(() => {
-            if (latestCallRef.current !== callRefId) return;
+            if (cancelled || latestCallRef.current !== ref) return;
             setActiveCallLead(null);
             setIsCalling(false);
             setCallDuration(0);
             setCallRefId(null);
-          }, 2000);
+          }, 2500);
         }
-      }).catch(() => {});
-    }
-  }, [callDuration, isCallConnected, activeCallLead, callRefId, hasCallBeenLive,setLocalLeads]);
+      } catch {
+        // network or server temporary blip, retry next tick
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isCalling, callRefId, activeCallLead, setLocalLeads]);
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60)
@@ -359,6 +388,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
     try {
       await updateLeadStatusAction(leadId, 'IN_PROGRESS');
       setLocalLeads(prev => prev.filter(l => l.id !== leadId));
+      router.refresh();
       alert('Lead moved to Active successfully.');
     } catch {
       alert('Failed to restore lead');
@@ -366,12 +396,24 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
   }
 
   const handleSaveSuccess = (updatedLead:Partial<import('@prisma/client').Lead>&{id:string}) => {
-    setLocalLeads(prev => prev.map(l => l.id === updatedLead.id ? { ...l, ...updatedLead } : l))
-    setPowerDialerLeads(prev => prev.map(l => l.id === updatedLead.id ? { ...l, ...updatedLead } : l))
+    const isNowClosed = Boolean(updatedLead.leadStatus?.startsWith('CLOSED') || (updatedLead.paymentStatus === 'FULL_PAYMENT' && updatedLead.leadStatus !== 'IN_PROGRESS'));
+    
+    if (!isClosed && isNowClosed) {
+      setLocalLeads(prev => prev.filter(l => l.id !== updatedLead.id));
+      setPowerDialerLeads(prev => prev.filter(l => l.id !== updatedLead.id));
+    } else if (isClosed && !isNowClosed) {
+      setLocalLeads(prev => prev.filter(l => l.id !== updatedLead.id));
+      setPowerDialerLeads(prev => prev.filter(l => l.id !== updatedLead.id));
+    } else {
+      setLocalLeads(prev => prev.map(l => l.id === updatedLead.id ? { ...l, ...updatedLead } : l));
+      setPowerDialerLeads(prev => prev.map(l => l.id === updatedLead.id ? { ...l, ...updatedLead } : l));
+    }
+
     setEditingLeadId(null)
     if (isPowerDialerMode) {
       setPowerDialerIndex(prev => Math.min(powerDialerLeads.length - 1, prev + 1))
     }
+    router.refresh();
   }
 
   const editingLead = localLeads.find(l => l.id === editingLeadId) || powerDialerLeads.find(l => l.id === editingLeadId)
@@ -396,12 +438,14 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Start Calling Button moved here */}
-            <button
-              onClick={openCallingSession}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: '#10b981', color: '#fff', borderRadius: '6px', fontWeight: 600, border: 'none', cursor: 'pointer', fontSize: '0.85rem' }}
-            >
-              <PhoneCall size={14} /> Start Calling
-            </button>
+            {!isClosed && (
+              <button
+                onClick={openCallingSession}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: '#10b981', color: '#fff', borderRadius: '6px', fontWeight: 600, border: 'none', cursor: 'pointer', fontSize: '0.85rem' }}
+              >
+                <PhoneCall size={14} /> Start Calling
+              </button>
+            )}
 
             {/* Search Box */}
             <div style={{ display: 'flex', alignItems: 'center', background: 'var(--background)', border: '1px solid var(--card-border)', borderRadius: '6px', overflow: 'hidden', minWidth: '250px', padding: '0 8px' }}>
@@ -741,14 +785,24 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                 setHasCallBeenLive(false);
                 setCallStatusMessage('Initiating call...');
                 setCallRefId(null);
-                  initiateCallAction(lead.id).then(res => {
-                    if (res.error) setCallStatusMessage(res.error);
-                    else { 
-                      setCallRefId(res.ref_id || null);
-                      setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
-                      setIsCallConnected(true);
-                    }
-                  }).catch(() => setCallStatusMessage('Failed to initiate call.'));
+                initiateCallAction(lead.id).then(res => {
+                  if (res.error) {
+                    setCallStatusMessage(res.error);
+                    setTimeout(() => {
+                      setIsCalling(false);
+                      setActiveCallLead(null);
+                    }, 3000);
+                  } else { 
+                    setCallRefId(res.ref_id || null);
+                    setCallStatusMessage('Calling your phone... Please answer');
+                  }
+                }).catch(() => {
+                  setCallStatusMessage('Failed to initiate call.');
+                  setTimeout(() => {
+                    setIsCalling(false);
+                    setActiveCallLead(null);
+                  }, 3000);
+                });
               }}
               onEdit={() => setEditingLeadId(lead.id)}
               onDelete={() => handleDeleteLead(lead.id)}
@@ -850,6 +904,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
           executives={executives}
           states={states}
           isAdmin={isAdmin}
+          userRole={userRole}
           updaterDepartment={updaterDepartment}
           onSaveSuccess={handleSaveSuccess}
         /></BodyPortal>
@@ -1051,21 +1106,25 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
             {isCalling ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
                 <div style={{ 
-                  width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(34, 197, 94, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success)', animation: 'pulse 2s infinite'
+                  width: '64px', height: '64px', borderRadius: '50%', 
+                  background: isCallConnected ? 'rgba(34, 197, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)', 
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                  color: isCallConnected ? 'var(--success)' : '#f59e0b', 
+                  animation: 'pulse 2s infinite'
                 }}>
                   <PhoneCall size={32} />
                 </div>
                 <h3 style={{ fontSize: '1.25rem', color: 'var(--foreground)', fontWeight: 600, margin: 0 }}>
-                  Calling {activeCallLead.name}
+                  {isCallConnected ? 'Connected with' : 'Calling'} {activeCallLead.name}
                 </h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '1rem', margin: 0 }}>
                   {activeCallLead.mobileNumber}
                 </p>
-                <div style={{ marginTop: '8px', color: callStatusMessage.includes('Error') || callStatusMessage.includes('Failed') ? '#ef4444' : '#60a5fa', fontSize: '0.875rem', whiteSpace: 'pre-wrap' }}>
+                <div style={{ marginTop: '8px', color: callStatusMessage.includes('Error') || callStatusMessage.includes('Failed') ? '#ef4444' : isCallConnected ? 'var(--success)' : '#f59e0b', fontSize: '0.875rem', whiteSpace: 'pre-wrap', fontWeight: 500 }}>
                   {callStatusMessage}
                 </div>
                 {isCallConnected && (
-                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--success)', marginTop: '16px', fontVariantNumeric: 'tabular-nums' }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--success)', marginTop: '8px', fontVariantNumeric: 'tabular-nums' }}>
                     {formatDuration(callDuration)}
                   </div>
                 )}
@@ -1081,7 +1140,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
       )}
 
       {issueLead && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+        <BodyPortal><div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
           <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', border: '1px solid var(--card-border)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <h3 style={{ color: 'var(--foreground)', fontSize: '1.25rem', fontWeight: 600 }}>Create Issue for Lead</h3>
@@ -1117,7 +1176,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
               </div>
             </form>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {isPowerDialerMode && powerDialerLeads[powerDialerIndex] && (
@@ -1148,8 +1207,9 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                 
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button 
+                    disabled={isCalling}
                     onClick={() => {
-                      if (!isCallConnected) {
+                      if (!isCalling) {
                         const lead = powerDialerLeads[powerDialerIndex];
                         setActiveCallLead(lead);
                         setIsCalling(true);
@@ -1159,19 +1219,41 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                         setCallRefId(null);
                         setCallStatusMessage('Initiating call...');
                         initiateCallAction(lead.id).then(res => {
-                          if (res.error) setCallStatusMessage(res.error);
-                          else {
+                          if (res.error) {
+                            setCallStatusMessage(res.error);
+                            setTimeout(() => {
+                              setIsCalling(false);
+                              setActiveCallLead(null);
+                            }, 3000);
+                          } else {
                             setCallRefId(res.ref_id || null);
-                            setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
-                            setIsCallConnected(true);
+                            setCallStatusMessage('Calling your phone... Please answer');
                           }
-                        }).catch(() => setCallStatusMessage('Failed to initiate call.'));
+                        }).catch(() => {
+                          setCallStatusMessage('Failed to initiate call.');
+                          setTimeout(() => {
+                            setIsCalling(false);
+                            setActiveCallLead(null);
+                          }, 3000);
+                        });
                       }
                     }}
-                    style={{ background: isCallConnected ? '#ef4444' : '#10b981', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '8px', fontSize: '1rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+                    style={{ 
+                      background: isCallConnected ? '#ef4444' : isCalling ? '#f59e0b' : '#10b981', 
+                      color: '#fff', 
+                      border: 'none', 
+                      padding: '12px 24px', 
+                      borderRadius: '8px', 
+                      fontSize: '1rem', 
+                      fontWeight: 600, 
+                      cursor: isCalling && !isCallConnected ? 'default' : 'pointer', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '8px' 
+                    }}
                   >
-                    {isCallConnected ? <PhoneOff size={20} /> : <PhoneCall size={20} />}
-                    {isCallConnected ? 'Call Active' : 'Call Now'}
+                    {isCallConnected ? <PhoneOff size={20} /> : <PhoneCall size={20} className={isCalling ? 'animate-pulse' : ''} />}
+                    {isCallConnected ? `In Call (${formatDuration(callDuration)})` : isCalling ? 'Ringing...' : 'Call Now'}
                   </button>
                 </div>
               </div>
@@ -1193,15 +1275,19 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Total Paid</div>
                   <div style={{ color: 'var(--success)', fontWeight: 600 }}>₹{((Number(powerDialerLeads[powerDialerIndex].amount1) || 0) + (Number(powerDialerLeads[powerDialerIndex].amount2) || 0) + (Number(powerDialerLeads[powerDialerIndex].amount3) || 0)).toLocaleString()}</div>
                 </div>
-                
-                <div style={{ gridColumn: 'span 2' }}>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Remark 1</div>
-                  <div style={{ color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'pre-wrap', maxHeight: '80px', overflowY: 'auto' }}>{powerDialerLeads[powerDialerIndex].remark1 || '-'}</div>
-                </div>
-                <div style={{ gridColumn: 'span 2' }}>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Remark 2</div>
-                  <div style={{ color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'pre-wrap', maxHeight: '80px', overflowY: 'auto' }}>{powerDialerLeads[powerDialerIndex].remark2 || '-'}</div>
-                </div>
+
+                {(sheetName === 'RECOVERY' || (Number(powerDialerLeads[powerDialerIndex].partPaymentAmount) || 0) > 0) && (
+                  <>
+                    <div style={{ gridColumn: 'span 1' }}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Part Payment</div>
+                      <div style={{ color: 'var(--warning, #eab308)', fontWeight: 600 }}>₹{(Number(powerDialerLeads[powerDialerIndex].partPaymentAmount) || 0).toLocaleString()}</div>
+                    </div>
+                    <div style={{ gridColumn: 'span 1' }}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Payment Date</div>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{powerDialerLeads[powerDialerIndex].paymentDate ? new Date(powerDialerLeads[powerDialerIndex].paymentDate).toLocaleDateString('en-GB') : '-'}</div>
+                    </div>
+                  </>
+                )}
 
                 <div style={{ gridColumn: 'span 1' }}>
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>State</div>
@@ -1211,7 +1297,17 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Webinar ID</div>
                   <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{powerDialerLeads[powerDialerIndex].webinarId || '-'}</div>
                 </div>
+
                 <div style={{ gridColumn: 'span 2' }}>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Remark 1</div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'pre-wrap', maxHeight: '80px', overflowY: 'auto' }}>{powerDialerLeads[powerDialerIndex].remark1 || '-'}</div>
+                </div>
+                <div style={{ gridColumn: 'span 2' }}>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Remark 2</div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'pre-wrap', maxHeight: '80px', overflowY: 'auto' }}>{powerDialerLeads[powerDialerIndex].remark2 || '-'}</div>
+                </div>
+
+                <div style={{ gridColumn: (sheetName === 'RECOVERY' || (Number(powerDialerLeads[powerDialerIndex].partPaymentAmount) || 0) > 0) ? 'span 4' : 'span 2' }}>
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Last Call</div>
                   <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
                     {powerDialerLeads[powerDialerIndex].callRecords?.[0]?.createdAt ? (() => {
@@ -1227,7 +1323,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
                   onClick={() => setEditingLeadId(powerDialerLeads[powerDialerIndex].id)}
                   style={{ flex: 1, minWidth: '160px', padding: '12px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                 >
-                  <Eye size={18} /> Update / Edit
+                  <Eye size={18} /> {(!isAdmin && userRole !== 'TL' && userRole !== 'ADMIN' && (powerDialerLeads[powerDialerIndex]?.leadStatus?.startsWith('CLOSED') || powerDialerLeads[powerDialerIndex]?.paymentStatus === 'FULL_PAYMENT')) ? 'View Details (Locked)' : 'Update / Edit'}
                 </button>
                 <button 
                   onClick={() => setViewingHistoryLead(powerDialerLeads[powerDialerIndex])}
@@ -1356,7 +1452,12 @@ function SalesLeadRow({
 
   return (
     <tr 
-      style={{ borderBottom: '1px solid var(--card-border)', height: '44px' }}
+      style={{ 
+        borderBottom: '1px solid var(--card-border)', 
+        height: '44px',
+        textDecoration: lead.isTransferred ? 'line-through' : 'none',
+        opacity: lead.isTransferred ? 0.6 : 1
+      }}
       onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
       onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
     >
@@ -1368,26 +1469,28 @@ function SalesLeadRow({
       <td style={{ color: 'var(--text-muted)', padding: '0 12px', verticalAlign: 'middle', fontSize: '13px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', width: '100%' }}>
           <span  style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{lead.mobileNumber}</span>
-          <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              onCall();
-            }}
-            style={{ 
-              padding: '4px', 
-              background: 'rgba(34, 197, 94, 0.1)', 
-              color: 'var(--success)', 
-              border: '1px solid rgba(34, 197, 94, 0.2)', 
-              borderRadius: '4px', 
-              cursor: 'pointer', 
-              display: 'flex', 
-              alignItems: 'center',
-              flexShrink: 0
-            }}
-            title="Call Lead"
-          >
-            <PhoneCall size={12} />
-          </button>
+          {!isClosed && (
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                onCall();
+              }}
+              style={{ 
+                padding: '4px', 
+                background: 'rgba(34, 197, 94, 0.1)', 
+                color: 'var(--success)', 
+                border: '1px solid rgba(34, 197, 94, 0.2)', 
+                borderRadius: '4px', 
+                cursor: 'pointer', 
+                display: 'flex', 
+                alignItems: 'center',
+                flexShrink: 0
+              }}
+              title="Call Lead"
+            >
+              <PhoneCall size={12} />
+            </button>
+          )}
         </div>
       </td>
       <td style={{ color: 'var(--text-muted)', padding: '0 12px', verticalAlign: 'middle', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px' }}>
@@ -1579,13 +1682,13 @@ function SalesLeadRow({
               style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', color: 'var(--primary)', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s' }}
               onMouseOver={(e) => e.currentTarget.style.background = 'rgba(59, 130, 246, 0.2)'}
               onMouseOut={(e) => e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)'}
-              title="View / Edit Lead"
+              title={(!isAdmin && userRole !== 'TL' && userRole !== 'ADMIN' && (lead.leadStatus?.startsWith('CLOSED') || lead.paymentStatus === 'FULL_PAYMENT')) ? "View Lead (Read-Only)" : "View / Edit Lead"}
             >
               <Eye size={16} />
             </button>
           )}
 
-          {sheetName === 'SALES' && (
+          {sheetName === 'SALES' && !isClosed && (
             <button 
               onClick={() => onTransfer && onTransfer()}
               style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)', color: '#a78bfa', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s' }}

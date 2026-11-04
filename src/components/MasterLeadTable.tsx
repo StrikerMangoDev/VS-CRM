@@ -71,6 +71,7 @@ type LeadData = {
   remark1?: string | null;
   remark2?: string | null;
   callRecords?: { createdAt: string | Date }[];
+  isTransferred?: boolean;
 }
 
 function MasterLeadTable({ 
@@ -109,6 +110,8 @@ function MasterLeadTable({
   const [callRefId, setCallRefId] = useState<string | null>(null)
   const latestCallRef = useRef<string | null>(null)
   useEffect(() => { latestCallRef.current = callRefId }, [callRefId])
+  const callDurationRef = useRef(0)
+  useEffect(() => { callDurationRef.current = callDuration }, [callDuration])
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -121,41 +124,65 @@ function MasterLeadTable({
   }, [isCallConnected]);
 
   useEffect(() => {
-    if (!isCallConnected || callDuration === 0) return;
-    
-    // Poll API every 5 seconds
-    if (callDuration % 5 === 0) {
-      checkCallStatusAction(callRefId || undefined).then(status => {
-        if (latestCallRef.current !== callRefId) return;
-        if (status.active === true) {
-          setHasCallBeenLive(true);
-        } else if (status.active === false) {
-          // If it's not active, maybe it disconnected.
-          // To avoid false negatives early in the call, we wait until it has been live or 15 seconds have passed.
-          if (hasCallBeenLive || callDuration > 15) {
-            setIsCallConnected(false);
-            setCallStatusMessage('Call Disconnected');
-            if (activeCallLead && callRefId) {
-              saveCallLogAction({
-                leadId: activeCallLead.id,
-                refId: callRefId,
-                duration: callDuration
-              }).then(() => {
-                router.refresh();
-              }).catch(() => {});
-            }
-            setTimeout(() => {
-              if (latestCallRef.current !== callRefId) return;
-              setActiveCallLead(null);
-              setIsCalling(false);
-              setCallDuration(0);
-              setCallRefId(null);
-            }, 2000);
+    if (!isCalling || !callRefId) return;
+
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      if (cancelled) return;
+      const ref = callRefId;
+      try {
+        const status = await checkCallStatusAction(ref);
+        if (cancelled || latestCallRef.current !== ref) return;
+
+        if (status.active) {
+          if (status.live) {
+            setIsCallConnected(true);
+            setHasCallBeenLive(true);
+            setCallStatusMessage('Call in progress');
+          } else {
+            setCallStatusMessage('Ringing your phone... Please answer');
           }
+        } else {
+          // Call ended
+          setIsCallConnected(false);
+          clearInterval(interval);
+
+          const finalDuration = typeof status.duration === 'number' ? status.duration : callDurationRef.current;
+          if (activeCallLead && ref) {
+            try {
+              const result = await saveCallLogAction({
+                leadId: activeCallLead.id,
+                refId: ref,
+                duration: finalDuration
+              });
+              if (cancelled || latestCallRef.current !== ref) return;
+              if (result.success && result.callRecord) {
+                setCallStatusMessage(result.callStatus === 'CALL_CONNECTED' ? `Call Completed (${result.callRecord.duration}s)` : 'Call Missed / Not Answered');
+                router.refresh();
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          setTimeout(() => {
+            if (cancelled || latestCallRef.current !== ref) return;
+            setActiveCallLead(null);
+            setIsCalling(false);
+            setCallDuration(0);
+            setCallRefId(null);
+          }, 2500);
         }
-      }).catch(() => {});
-    }
-  }, [callDuration, isCallConnected, activeCallLead, callRefId, hasCallBeenLive, router]);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isCalling, callRefId, activeCallLead, router]);
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60)
@@ -737,8 +764,8 @@ function MasterLeadTable({
                   borderBottom: '1px solid var(--card-border)', 
                   height: '48px',
                   background: selectedLeadIds.has(lead.id) ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
-                  textDecoration: lead.leadStatus?.startsWith('CLOSED') ? 'line-through' : 'none',
-                  opacity: lead.leadStatus?.startsWith('CLOSED') ? 0.6 : 1
+                  textDecoration: lead.isTransferred ? 'line-through' : 'none',
+                  opacity: lead.isTransferred ? 0.6 : 1
                 }} 
                 onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.02)'} 
                 onMouseOut={e => e.currentTarget.style.background=selectedLeadIds.has(lead.id) ? 'rgba(59, 130, 246, 0.1)' : 'transparent'}
@@ -768,13 +795,23 @@ function MasterLeadTable({
                         setCallRefId(null);
                         setCallStatusMessage('Initiating call...');
                         initiateCallAction(lead.id).then(res => {
-                          if (res.error) setCallStatusMessage(res.error);
-                          else { 
+                          if (res.error) {
+                            setCallStatusMessage(res.error);
+                            setTimeout(() => {
+                              setIsCalling(false);
+                              setActiveCallLead(null);
+                            }, 3000);
+                          } else { 
                             setCallRefId(res.ref_id || null);
-                            setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
-                            setIsCallConnected(true);
+                            setCallStatusMessage('Calling your phone... Please answer');
                           }
-                        }).catch(() => setCallStatusMessage('Failed to initiate call.'));
+                        }).catch(() => {
+                          setCallStatusMessage('Failed to initiate call.');
+                          setTimeout(() => {
+                            setIsCalling(false);
+                            setActiveCallLead(null);
+                          }, 3000);
+                        });
                       }}
                       style={{ 
                         padding: '4px', 
@@ -1403,6 +1440,7 @@ function MasterLeadTable({
           executives={executives}
           states={uniqueStates}
           isAdmin={isAdmin}
+          userRole={isTL ? 'TL' : (isAdmin ? 'ADMIN' : 'EXEC')}
           updaterDepartment={isAdmin ? 'ADMIN' : (isTL ? 'TL' : 'SALES')}
           dropdowns={dropdowns}
           onSaveSuccess={() => {setEditingLead(null)}} 
@@ -1417,26 +1455,26 @@ function MasterLeadTable({
                   width: '64px', 
                   height: '64px', 
                   borderRadius: '50%', 
-                  background: 'rgba(34, 197, 94, 0.2)',
+                  background: isCallConnected ? 'rgba(34, 197, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: 'var(--success)',
+                  color: isCallConnected ? 'var(--success)' : '#f59e0b',
                   animation: 'pulse 2s infinite'
                 }}>
                   <PhoneCall size={32} />
                 </div>
                 <h3 style={{ fontSize: '1.25rem', color: 'var(--foreground)', fontWeight: 600, margin: 0 }}>
-                  Calling {activeCallLead.name}
+                  {isCallConnected ? 'Connected with' : 'Calling'} {activeCallLead.name}
                 </h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '1rem', margin: 0 }}>
                   {activeCallLead.mobileNumber}
                 </p>
-                <div style={{ marginTop: '8px', color: callStatusMessage.includes('Error') || callStatusMessage.includes('Failed') ? '#ef4444' : '#60a5fa', fontSize: '0.875rem', whiteSpace: 'pre-wrap' }}>
+                <div style={{ marginTop: '8px', color: callStatusMessage.includes('Error') || callStatusMessage.includes('Failed') ? '#ef4444' : isCallConnected ? 'var(--success)' : '#f59e0b', fontSize: '0.875rem', whiteSpace: 'pre-wrap', fontWeight: 500 }}>
                   {callStatusMessage}
                 </div>
                 {isCallConnected && (
-                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--success)', marginTop: '16px', fontVariantNumeric: 'tabular-nums' }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--success)', marginTop: '8px', fontVariantNumeric: 'tabular-nums' }}>
                     {formatDuration(callDuration)}
                   </div>
                 )}
@@ -1455,7 +1493,7 @@ function MasterLeadTable({
       )}
 
       {issueLead && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <BodyPortal><div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
           <div className="glass-panel" style={{ width: '100%', maxWidth: '500px', border: '1px solid var(--card-border)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <h3 style={{ color: 'var(--foreground)', fontSize: '1.25rem', fontWeight: 600 }}>Create Issue for Lead</h3>
@@ -1491,7 +1529,7 @@ function MasterLeadTable({
               </div>
             </form>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {isBulkTransferModalOpen && (

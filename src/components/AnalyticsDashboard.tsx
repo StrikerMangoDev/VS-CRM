@@ -834,6 +834,7 @@ export default function AnalyticsDashboard({ leads, leadQuery={sheet:'ANALYTICS'
           lead={editingLead}
           updaterDepartment={currentUser?.role === 'EXEC' ? currentUser.department : (leadQuery.sheet === 'RECOVERY' ? 'RECOVERY' : 'SALES')}
           isAdmin={userRole === 'ADMIN'}
+          userRole={userRole || currentUser?.role}
           onClose={() => setEditingLead(null)}
           onSaveSuccess={() => {
             if (onUpdate) onUpdate();

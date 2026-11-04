@@ -140,9 +140,17 @@ function calculateLeadLogStatus(recoveryAssignedAt: Date | null): string {
 export async function updateLeadAction(formData: FormData) {
   return withLeadTransaction(async () => {
 
-  await requireLeadAccess(String(formData.get("id")));
-
   const id = formData.get('id') as string
+  const actor = await requireLeadAccess(id);
+  const existingLead = await prisma.lead.findUnique({ where: { id } })
+  if (!existingLead) throw new Error('Lead not found')
+  if (actor.role === 'EXEC') {
+    const isClosedOrFull = existingLead.leadStatus?.startsWith('CLOSED') || (existingLead.paymentStatus === 'FULL_PAYMENT' && existingLead.leadStatus !== 'IN_PROGRESS')
+    if (isClosedOrFull) {
+      throw new Error('Edit access is restricted for executives on closed or full payment leads')
+    }
+  }
+
   const name = formData.get('name') as string
   const webinarName = formData.get('webinarName') as string || null
   const webinarId = formData.get('webinarId') as string || null
@@ -166,8 +174,6 @@ export async function updateLeadAction(formData: FormData) {
   const recoveryAmount = recoveryAmountStr ? parseFloat(recoveryAmountStr as string) : null
   const whatsappJoined = formData.get('whatsappJoined') === 'on'
   const customData = formData.get('customData') as string || "{}"
-
-  const existingLead = await prisma.lead.findUnique({ where: { id } });
   
   let frozenLeadLogStatus = existingLead?.frozenLeadLogStatus || null;
   if (!frozenLeadLogStatus && (paymentStatus === 'FULL_PAYMENT' || totalPayment >= 15999)) {
@@ -412,11 +418,12 @@ export async function updateLeadAmountsAction(leadId: string, amount1: number | 
   });
 }
 
-export async function assignLeadAction(leadId: string, userId: string, stage: string) {
+export async function assignLeadAction(leadId: string, rawUserId: string, stage: string) {
   return withLeadTransaction(async () => {
 
   await requireLeadAccess(leadId, true);
 
+  const [userId, targetDept] = rawUserId.split('__');
   // Fetch the new user to check their department
   const newUser = await prisma.user.findUnique({
     where: { id: userId }
@@ -461,10 +468,18 @@ export async function assignLeadAction(leadId: string, userId: string, stage: st
     }
   })
 
-  if (newUser.department === 'RECOVERY') {
+  const isRecovery = targetDept === 'RECOVERY' || (!targetDept && newUser.department === 'RECOVERY');
+  const isSales = targetDept === 'SALES' || (!targetDept && newUser.department === 'SALES');
+
+  if (isRecovery) {
     await prisma.lead.update({
       where: { id: leadId },
       data: { recoveryAssignedAt: new Date(), frozenLeadLogStatus: null }
+    })
+  } else if (isSales) {
+    await prisma.lead.update({
+      where: { id: leadId },
+      data: { recoveryAssignedAt: null }
     })
   }
 
@@ -501,11 +516,12 @@ export async function unassignLeadAction(leadId: string) {
   });
 }
 
-export async function bulkAssignLeadsAction(leadIds: string[], userId: string, stage: string) {
+export async function bulkAssignLeadsAction(leadIds: string[], rawUserId: string, stage: string) {
   return withLeadTransaction(async () => {
 
   await requireSales(true); for (const id of leadIds) await requireLeadAccess(id, true);
 
+  const [userId, targetDept] = rawUserId.split('__');
   const newUser = await prisma.user.findUnique({
     where: { id: userId }
   })
@@ -514,6 +530,9 @@ export async function bulkAssignLeadsAction(leadIds: string[], userId: string, s
   const actor = await requireSales(true);
   if (actor.role !== 'ADMIN' && newUser.mainDepartment !== actor.mainDepartment) throw new Error('Forbidden');
   if (!['FRESH_LOG','NEXT_LOG','OLD_LOG','COMPLETED','IN_PROGRESS','EXTRA_DIALER'].includes(stage)) throw new Error('Invalid stage');
+
+  const isRecovery = targetDept === 'RECOVERY' || (!targetDept && newUser.department === 'RECOVERY');
+  const isSales = targetDept === 'SALES' || (!targetDept && newUser.department === 'SALES');
 
   for (const leadId of leadIds) {
     const existingAssignments = await prisma.assignment.findMany({
@@ -546,10 +565,15 @@ export async function bulkAssignLeadsAction(leadIds: string[], userId: string, s
       }
     })
 
-    if (newUser.department === 'RECOVERY') {
+    if (isRecovery) {
       await prisma.lead.update({
         where: { id: leadId },
         data: { recoveryAssignedAt: new Date(), frozenLeadLogStatus: null }
+      })
+    } else if (isSales) {
+      await prisma.lead.update({
+        where: { id: leadId },
+        data: { recoveryAssignedAt: null }
       })
     }
   }
@@ -865,10 +889,18 @@ export async function bulkUploadLeadsAction(formData: FormData) {
 export async function updateLeadStatusAction(id: string, status: string) {
   return withLeadTransaction(async () => {
 
-  await requireLeadAccess(id);
+  const actor = await requireLeadAccess(id);
 
   const existingLead = await prisma.lead.findUnique({ where: { id } })
-  if (existingLead && existingLead.leadStatus !== status) {
+  if (!existingLead) throw new Error('Lead not found')
+  if (actor.role === 'EXEC') {
+    const isClosedOrFull = existingLead.leadStatus?.startsWith('CLOSED') || (existingLead.paymentStatus === 'FULL_PAYMENT' && existingLead.leadStatus !== 'IN_PROGRESS')
+    if (isClosedOrFull) {
+      throw new Error('Edit access is restricted for executives on closed or full payment leads')
+    }
+  }
+
+  if (existingLead.leadStatus !== status) {
     await logAuditChanges(id, [{ field: 'Lead Status', oldVal: existingLead.leadStatus, newVal: status }])
   }
   await prisma.lead.update({
@@ -883,10 +915,18 @@ export async function updateLeadStatusAction(id: string, status: string) {
 export async function updateLeadCallStatusAction(id: string, callStatus: string) {
   return withLeadTransaction(async () => {
 
-  await requireLeadAccess(id);
+  const actor = await requireLeadAccess(id);
 
   const existingLead = await prisma.lead.findUnique({ where: { id } })
-  if (existingLead && existingLead.callStatus !== callStatus) {
+  if (!existingLead) throw new Error('Lead not found')
+  if (actor.role === 'EXEC') {
+    const isClosedOrFull = existingLead.leadStatus?.startsWith('CLOSED') || (existingLead.paymentStatus === 'FULL_PAYMENT' && existingLead.leadStatus !== 'IN_PROGRESS')
+    if (isClosedOrFull) {
+      throw new Error('Edit access is restricted for executives on closed or full payment leads')
+    }
+  }
+
+  if (existingLead.callStatus !== callStatus) {
     await logAuditChanges(id, [{ field: 'Call Status', oldVal: existingLead.callStatus, newVal: callStatus }])
   }
   await prisma.lead.update({
@@ -921,11 +961,18 @@ export async function updateLeadCompleteAction(
   await requireLeadAccess(leadId, false);
 
   const actor = await requireLeadAccess(leadId);
-  if (actor.role === 'EXEC' && data.updaterDepartment !== actor.department) throw new Error('Forbidden');
-  if ([data.amount1, data.amount2, data.amount3, data.discount, data.totalPayment].some(n => n != null && (!Number.isFinite(n) || n < 0))) throw new Error('Invalid amount');
-  if (data.nextFollowUpDate && !Number.isFinite(data.nextFollowUpDate.getTime())) throw new Error('Invalid follow-up date');
   const existingLead = await prisma.lead.findUnique({ where: { id: leadId } })
   if (!existingLead) throw new Error('Lead not found')
+
+  if (actor.role === 'EXEC') {
+    if (data.updaterDepartment !== actor.department) throw new Error('Forbidden');
+    const isClosedOrFull = existingLead.leadStatus?.startsWith('CLOSED') || (existingLead.paymentStatus === 'FULL_PAYMENT' && existingLead.leadStatus !== 'IN_PROGRESS')
+    if (isClosedOrFull) {
+      throw new Error('Edit access is restricted for executives on closed or full payment leads')
+    }
+  }
+  if ([data.amount1, data.amount2, data.amount3, data.discount, data.totalPayment].some(n => n != null && (!Number.isFinite(n) || n < 0))) throw new Error('Invalid amount');
+  if (data.nextFollowUpDate && !Number.isFinite(data.nextFollowUpDate.getTime())) throw new Error('Invalid follow-up date');
 
   const dataToUpdate: import('@prisma/client').Prisma.LeadUncheckedUpdateInput = {
     callStatus: data.callStatus,

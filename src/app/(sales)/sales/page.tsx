@@ -13,9 +13,7 @@ export default async function SalesDashboard({ searchParams }: { searchParams: P
   if (!sessionCookie) return null;
   const user = sessionCookie.user;
 
-  const isAdmin = user?.department === 'ALL';
-
-
+  const isAdmin = user?.role === 'ADMIN';
 
   const initialPage=await getLeadPage({sheet:'SALES',closed:isClosed})
   const webinarStats=await getWebinarStats({sheet:'SALES',closed:isClosed})
@@ -26,7 +24,8 @@ export default async function SalesDashboard({ searchParams }: { searchParams: P
         { currentModuleId: null },
         { currentModuleId: { not: 'EXTRA_DIALER' } }
       ],
-      ...(isAdmin ? { assignments: { some: { user: { department: 'SALES' } } } } : { assignments: { some: { userId: user.id } } })
+      recoveryAssignedAt: null,
+      ...(isAdmin ? { assignments: { some: { OR: [{ user: { department: 'SALES' } }, { user: { role: 'TL' } }] } } } : { assignments: { some: { userId: user.id } } })
     },
     select: dashboardLeadSelect,
     orderBy: { createdAt: 'desc' }

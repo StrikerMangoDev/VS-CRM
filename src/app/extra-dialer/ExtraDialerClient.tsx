@@ -58,6 +58,8 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
   const [callRefId, setCallRefId] = useState<string | null>(null)
   const latestCallRef = React.useRef<string | null>(null)
   React.useEffect(() => { latestCallRef.current = callRefId }, [callRefId])
+  const callDurationRef = React.useRef(0)
+  React.useEffect(() => { callDurationRef.current = callDuration }, [callDuration])
   
   // Call Tracker Logic
   React.useEffect(() => {
@@ -71,40 +73,65 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
   }, [isCallConnected]);
 
   React.useEffect(() => {
-    if (!isCallConnected || callDuration === 0) return;
-    
-    // Poll API every 5 seconds
-    if (callDuration % 5 === 0) {
-      checkCallStatusAction(callRefId || undefined).then(status => {
-        if (latestCallRef.current !== callRefId) return;
-        if (status.active === true) {
-          setHasCallBeenLive(true);
-        } else if (status.active === false) {
-          // If it's not active, maybe it disconnected.
-          if (hasCallBeenLive || callDuration > 20) {
-            setIsCallConnected(false);
-            setCallStatusMessage('Call Disconnected');
-            if (activeLeadId && callRefId) {
-              saveCallLogAction({
-                leadId: activeLeadId,
-                refId: callRefId,
-                duration: callDuration
-              }).then(() => {
-                router.refresh();
-              }).catch(() => {});
-            }
-            setTimeout(() => {
-              if (latestCallRef.current !== callRefId) return;
-              setIsCalling(false);
-              setCallDuration(0);
-              setCallRefId(null);
-              setCallStatusMessage('');
-            }, 2000);
+    if (!isCalling || !callRefId) return;
+
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      if (cancelled) return;
+      const ref = callRefId;
+      try {
+        const status = await checkCallStatusAction(ref);
+        if (cancelled || latestCallRef.current !== ref) return;
+
+        if (status.active) {
+          if (status.live) {
+            setIsCallConnected(true);
+            setHasCallBeenLive(true);
+            setCallStatusMessage('Call in progress');
+          } else {
+            setCallStatusMessage('Ringing your phone... Please answer');
           }
+        } else {
+          // Call ended
+          setIsCallConnected(false);
+          clearInterval(interval);
+
+          const finalDuration = typeof status.duration === 'number' ? status.duration : callDurationRef.current;
+          if (activeLeadId && ref) {
+            try {
+              const result = await saveCallLogAction({
+                leadId: activeLeadId,
+                refId: ref,
+                duration: finalDuration
+              });
+              if (cancelled || latestCallRef.current !== ref) return;
+              if (result.success && result.callRecord) {
+                setCallStatusMessage(result.callStatus === 'CALL_CONNECTED' ? `Call Completed (${result.callRecord.duration}s)` : 'Call Missed / Not Answered');
+                router.refresh();
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          setTimeout(() => {
+            if (cancelled || latestCallRef.current !== ref) return;
+            setIsCalling(false);
+            setCallDuration(0);
+            setCallRefId(null);
+            setCallStatusMessage('');
+          }, 2500);
         }
-      }).catch(() => {});
-    }
-  }, [callDuration, isCallConnected, activeLeadId, callRefId, hasCallBeenLive,router]);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isCalling, callRefId, activeLeadId, router]);
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60)
@@ -133,8 +160,7 @@ export default function ExtraDialerClient({ initialPage }: { initialPage: CallPa
       } else {
         toast.success('Call initiated')
         setCallRefId(res.ref_id || null);
-        setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
-        setIsCallConnected(true);
+        setCallStatusMessage('Calling your phone... Please answer');
       }
       if (res.leadId) {
         setActiveLeadId(res.leadId)

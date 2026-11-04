@@ -21,6 +21,8 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
   const [callRefId, setCallRefId] = useState<string | null>(null)
   const latestCallRef = useRef<string | null>(null)
   useEffect(() => { latestCallRef.current = callRefId }, [callRefId])
+  const callDurationRef = useRef(0)
+  useEffect(() => { callDurationRef.current = callDuration }, [callDuration])
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -33,32 +35,64 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
   }, [isCallConnected]);
 
   useEffect(() => {
-    if (!isCallConnected || callDuration === 0) return;
-    
-    if (callDuration % 5 === 0) {
-      checkCallStatusAction(callRefId || undefined).then(status => {
-        if (latestCallRef.current !== callRefId) return;
-        if (status.active === true) {
-          setHasCallBeenLive(true);
-        } else if (status.active === false) {
-          setHasCallBeenLive(currentHasLive => {
-            if (currentHasLive || callDuration > 15) {
-              setIsCallConnected(false);
-              setCallStatusMessage('Call Disconnected');
-              if (activeCallLead && callRefId) {
-                saveCallLogAction({
-                  leadId: activeCallLead.id,
-                  refId: callRefId,
-                  duration: callDuration
-                }).catch(() => {});
+    if (!isCalling || !callRefId) return;
+
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      if (cancelled) return;
+      const ref = callRefId;
+      try {
+        const status = await checkCallStatusAction(ref);
+        if (cancelled || latestCallRef.current !== ref) return;
+
+        if (status.active) {
+          if (status.live) {
+            setIsCallConnected(true);
+            setHasCallBeenLive(true);
+            setCallStatusMessage('Call in progress');
+          } else {
+            setCallStatusMessage('Ringing your phone... Please answer');
+          }
+        } else {
+          // Call ended
+          setIsCallConnected(false);
+          clearInterval(interval);
+
+          const finalDuration = typeof status.duration === 'number' ? status.duration : callDurationRef.current;
+          if (activeCallLead && ref) {
+            try {
+              const result = await saveCallLogAction({
+                leadId: activeCallLead.id,
+                refId: ref,
+                duration: finalDuration
+              });
+              if (cancelled || latestCallRef.current !== ref) return;
+              if (result.success && result.callRecord) {
+                setCallStatusMessage(result.callStatus === 'CALL_CONNECTED' ? `Call Completed (${result.callRecord.duration}s)` : 'Call Missed / Not Answered');
               }
+            } catch {
+              // ignore
             }
-            return currentHasLive;
-          });
+          }
+
+          setTimeout(() => {
+            if (cancelled || latestCallRef.current !== ref) return;
+            setActiveCallLead(null);
+            setIsCalling(false);
+            setCallDuration(0);
+            setCallRefId(null);
+          }, 2500);
         }
-      }).catch(() => {});
-    }
-  }, [callDuration, isCallConnected, activeCallLead, callRefId]);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isCalling, callRefId, activeCallLead]);
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60)
@@ -176,13 +210,23 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
                           setHasCallBeenLive(false);
                           setCallStatusMessage('Initiating call...');
                           initiateCallAction(lead.id).then(res => {
-                            if (res.error) setCallStatusMessage(res.error);
-                            else { 
+                            if (res.error) {
+                              setCallStatusMessage(res.error);
+                              setTimeout(() => {
+                                setIsCalling(false);
+                                setActiveCallLead(null);
+                              }, 3000);
+                            } else { 
                               if (res.ref_id) setCallRefId(res.ref_id);
-                              setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
-                              setIsCallConnected(true);
+                              setCallStatusMessage('Calling your phone... Please answer');
                             }
-                          }).catch(() => setCallStatusMessage('Failed to initiate call.'));
+                          }).catch(() => {
+                            setCallStatusMessage('Failed to initiate call.');
+                            setTimeout(() => {
+                              setIsCalling(false);
+                              setActiveCallLead(null);
+                            }, 3000);
+                          });
                         }}
                         style={{ 
                           padding: '4px 6px', 
@@ -258,13 +302,23 @@ export default function TechnicalTable({ initialPage, tabType, webinarFilter }: 
                         setHasCallBeenLive(false);
                         setCallStatusMessage('Initiating call...');
                         initiateCallAction(lead.id).then(res => {
-                          if (res.error) setCallStatusMessage(res.error);
-                          else { 
+                          if (res.error) {
+                            setCallStatusMessage(res.error);
+                            setTimeout(() => {
+                              setIsCalling(false);
+                              setActiveCallLead(null);
+                            }, 3000);
+                          } else { 
                             if (res.ref_id) setCallRefId(res.ref_id);
-                            setCallStatusMessage(res.message || 'Call initiated. Please pick up your device.');
-                            setIsCallConnected(true);
+                            setCallStatusMessage('Calling your phone... Please answer');
                           }
-                        }).catch(() => setCallStatusMessage('Failed to initiate call.'));
+                        }).catch(() => {
+                          setCallStatusMessage('Failed to initiate call.');
+                          setTimeout(() => {
+                            setIsCalling(false);
+                            setActiveCallLead(null);
+                          }, 3000);
+                        });
                       }}
                       style={{ 
                         padding: '4px 6px', 

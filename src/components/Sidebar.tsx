@@ -48,7 +48,7 @@ export default function Sidebar({ user, isAdmin }: { user: DashboardUser, isAdmi
   };
 
   useEffect(() => {
-    if (isAdmin || user?.department === 'TECHNICAL') {
+    if (isAdmin || user?.department === 'TECHNICAL' || user?.department === 'Technical Team') {
       const fetchCount = async () => {
         try {
           const res = await fetch('/api/issues/unassigned-count');
@@ -184,9 +184,17 @@ export default function Sidebar({ user, isAdmin }: { user: DashboardUser, isAdmi
                 </Link>
 
                 <SectionHeader title="MAIN MENU" />
-                <Link href="/" className={`nav-item ${['/', '/part-payment', '/full-payment', '/sales/issues'].includes(pathname) ? 'active' : ''}`} title={isCollapsed ? "Sales" : ""}>
+                <Link href="/" className={`nav-item ${['/', '/part-payment', '/full-payment'].includes(pathname) ? 'active' : ''}`} title={isCollapsed ? "Sales" : ""}>
                   <div className="nav-icon shining glow-blue"><TrendingUp size={18} /></div>
                   {!isCollapsed && <span className="nav-text">Sales</span>}
+                </Link>
+                <Link href="/sales" className={`nav-item ${pathname === '/sales' ? 'active' : ''}`} title={isCollapsed ? "Sales Dashboard" : ""}>
+                  <div className="nav-icon shining glow-teal"><FolderKanban size={18} /></div>
+                  {!isCollapsed && <span className="nav-text">Sales Dashboard</span>}
+                </Link>
+                <Link href="/recovery" className={`nav-item ${pathname === '/recovery' ? 'active' : ''}`} title={isCollapsed ? "Recovery Dashboard" : ""}>
+                  <div className="nav-icon shining glow-emerald"><FolderKanban size={18} /></div>
+                  {!isCollapsed && <span className="nav-text">Recovery Dashboard</span>}
                 </Link>
                 <Link href="/webinars" className={`nav-item ${pathname === '/webinars' ? 'active' : ''}`} title={isCollapsed ? "Webinars" : ""}>
                   <div className="nav-icon shining glow-purple"><Video size={18} /></div>
@@ -208,7 +216,7 @@ export default function Sidebar({ user, isAdmin }: { user: DashboardUser, isAdmi
               </>
             )}
 
-            {!isAdmin && user?.department === 'SALES' && (
+            {!isAdmin && (user?.department === 'SALES' || user?.department === 'Sales Team') && (
               <>
                 <SectionHeader title="ANALYTICS" />
                 <Link href="/performance" className={`nav-item ${pathname === '/performance' ? 'active' : ''}`} title={isCollapsed ? "Performance" : ""}>
@@ -221,6 +229,12 @@ export default function Sidebar({ user, isAdmin }: { user: DashboardUser, isAdmi
                   <div className="nav-icon shining glow-blue"><TrendingUp size={18} /></div>
                   {!isCollapsed && <span className="nav-text">Sales</span>}
                 </Link>
+                {user?.role === 'TL' && (
+                  <Link href="/recovery" className={`nav-item ${pathname === '/recovery' ? 'active' : ''}`} title={isCollapsed ? "Recovery Dashboard" : ""}>
+                    <div className="nav-icon shining glow-emerald"><FolderKanban size={18} /></div>
+                    {!isCollapsed && <span className="nav-text">Recovery Dashboard</span>}
+                  </Link>
+                )}
                 <Link href="/sales/issues" className={`nav-item ${pathname === '/sales/issues' ? 'active' : ''}`} title={isCollapsed ? "Issue Table" : ""}>
                   <div className="nav-icon shining glow-purple"><AlertCircle size={18} /></div>
                   {!isCollapsed && <span className="nav-text">Issue Table</span>}
@@ -236,7 +250,7 @@ export default function Sidebar({ user, isAdmin }: { user: DashboardUser, isAdmi
               </>
             )}
 
-            {!isAdmin && user?.department === 'RECOVERY' && (
+            {!isAdmin && (user?.department === 'RECOVERY' || user?.department === 'Recovery Team') && (
               <>
                 <SectionHeader title="ANALYTICS" />
                 <Link href="/performance" className={`nav-item ${pathname === '/performance' ? 'active' : ''}`} title={isCollapsed ? "Performance" : ""}>
@@ -264,7 +278,7 @@ export default function Sidebar({ user, isAdmin }: { user: DashboardUser, isAdmi
               </>
             )}
 
-            {!isAdmin && user?.department === 'TECHNICAL' && (
+            {!isAdmin && (user?.department === 'TECHNICAL' || user?.department === 'Technical Team') && (
               <>
                 <SectionHeader title="ANALYTICS" isCollapsed={isCollapsed} />
                 <Link href="/performance" className={`nav-item ${pathname === '/performance' ? 'active' : ''}`} title={isCollapsed ? "Performance" : ""}>

@@ -28,13 +28,27 @@ export default async function ExtraDialerLeadsSheet() {
 
   const initialPage = await getLeadPage({sheet:'EXTRA_DIALER'})
 
-  // Only fetch Sales Department executives for assignments
-  const executives = await prisma.user.findMany({
+  // Fetch Sales Department executives and TLs for assignments
+  const executivesRaw = await prisma.user.findMany({
     where: { 
-      role: 'EXEC',
-      mainDepartment: 'Sales Department'
-    }
+      isActive: true,
+      mainDepartment: 'Sales Department',
+      role: { in: ['EXEC', 'TL'] }
+    },
+    select: { id: true, name: true, department: true, role: true }
   })
+
+  const executives: { id: string; name: string; department: string }[] = []
+  for (const exec of executivesRaw) {
+    if (exec.role === 'TL') {
+      executives.push(
+        { id: `${exec.id}__SALES`, name: `${exec.name} (Sales)`, department: 'SALES' },
+        { id: `${exec.id}__RECOVERY`, name: `${exec.name} (Recovery)`, department: 'RECOVERY' }
+      )
+    } else {
+      executives.push({ id: exec.id, name: exec.name, department: exec.department })
+    }
+  }
 
   const customColumns = await prisma.customColumn.findMany({
     where: { departmentTarget: 'MASTER' }

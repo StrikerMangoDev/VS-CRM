@@ -3,13 +3,14 @@
 import React,{ useState,useEffect,useCallback } from 'react'
 import { updateLeadCompleteAction } from '@/app/actions/lead'
 import { actionErrorMessage } from '@/lib/action-error'
-import { MessageSquare,Send,Check } from 'lucide-react'
+import { MessageSquare,Send,Check,Lock,AlertCircle } from 'lucide-react'
 import { getWhatsAppTemplatesAction,updateLeadWhatsAppTemplateAction } from '@/app/actions/whatsappTemplate'
 
 export default function EditLeadModal({ 
   lead, 
   onClose, 
   isAdmin = false,
+  userRole = '',
   updaterDepartment = 'SALES',
   dropdowns = {},
   onSaveSuccess
@@ -20,6 +21,7 @@ export default function EditLeadModal({
   executives?: import('@/lib/view-types').Person[],
   states?: string[],
   isAdmin?: boolean,
+  userRole?: string,
   updaterDepartment?: string,
   dropdowns?: Record<string, string[]>,
   onSaveSuccess: (updatedLead: Partial<import('@prisma/client').Lead>&{id:string}) => void
@@ -42,6 +44,13 @@ export default function EditLeadModal({
   
   const [formData, setFormData] = useState(defaultFormData)
   const [initialFormData, ] = useState(defaultFormData)
+
+  const isLeadClosed = Boolean(
+    lead.leadStatus?.startsWith('CLOSED') ||
+    (lead.paymentStatus === 'FULL_PAYMENT' && lead.leadStatus !== 'IN_PROGRESS')
+  )
+  const isExecutive = !isAdmin && userRole !== 'TL' && userRole !== 'ADMIN'
+  const isReadOnly = isExecutive && isLeadClosed
   
   // WhatsApp Template in Modal (Sales & Recovery Departments)
   const isSalesDept = updaterDepartment === 'SALES' || updaterDepartment === 'Sales Department' || updaterDepartment === 'RECOVERY' || isAdmin
@@ -130,6 +139,10 @@ export default function EditLeadModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isReadOnly) {
+      alert('Edit access is restricted for executives on closed or full payment leads.')
+      return
+    }
     setIsSaving(true)
     let savedLead: Awaited<ReturnType<typeof updateLeadCompleteAction>>
     
@@ -179,6 +192,13 @@ export default function EditLeadModal({
     outline: 'none',
     boxSizing: 'border-box' as const
   }
+
+  const effectiveInputStyle = isReadOnly ? {
+    ...inputStyle,
+    opacity: 0.65,
+    cursor: 'not-allowed',
+    background: 'rgba(255, 255, 255, 0.03)'
+  } : inputStyle
 
   const labelStyle = {
     display: 'block',
@@ -268,7 +288,7 @@ export default function EditLeadModal({
           borderTopRightRadius: '12px'
         }}>
           <div>
-            <h2 style={{ margin: '0 0 4px 0', color: 'var(--text-primary)', fontSize: '1.1rem' }}>View / Edit Lead</h2>
+            <h2 style={{ margin: '0 0 4px 0', color: 'var(--text-primary)', fontSize: '1.1rem' }}>{isReadOnly ? 'View Lead (Read-Only)' : 'View / Edit Lead'}</h2>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '0.85rem' }}>
               <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>{lead.uniqueId}</span>
               <span style={{ color: 'var(--text-muted)' }}>•</span>
@@ -287,6 +307,24 @@ export default function EditLeadModal({
                   </span>
                 </>
               )}
+              {isReadOnly && (
+                <>
+                  <span style={{ color: 'var(--text-muted)' }}>•</span>
+                  <span style={{ 
+                    fontSize: '0.7rem', 
+                    padding: '2px 8px', 
+                    borderRadius: '8px',
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    color: '#ef4444',
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    <Lock size={10} /> Locked (No Edit Access)
+                  </span>
+                </>
+              )}
             </div>
           </div>
           <button 
@@ -300,6 +338,24 @@ export default function EditLeadModal({
         {/* Content Area - MinHeight 0 fixes flexbox overflow issues */}
         <div style={{ padding: '16px 20px', flex: 1, overflowY: 'auto', minHeight: 0 }}>
           <form id="editLeadForm" onSubmit={handleSave}>
+            {isReadOnly && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                color: '#fca5a5',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginBottom: '16px'
+              }}>
+                <AlertCircle size={16} style={{ color: '#ef4444', flexShrink: 0 }} />
+                <span>Ye lead closed / full payment done hai. Executive ke liye is lead ka edit access restricted hai.</span>
+              </div>
+            )}
             
             {/* 1. LEAD & WEBINAR */}
             <div style={sectionStyle}>
@@ -336,7 +392,7 @@ export default function EditLeadModal({
               <div style={{...grid2Col, marginBottom: '12px'}}>
                 <div>
                   <label style={labelStyle}>Call Status</label>
-                  <select name="callStatus" value={formData.callStatus} onChange={handleChange} style={inputStyle}>
+                  <select name="callStatus" value={formData.callStatus} onChange={handleChange} disabled={isReadOnly} style={effectiveInputStyle}>
                     {dropdowns['Call Status'] && dropdowns['Call Status'].length > 0 ? (
                       dropdowns['Call Status'].map(status => (
                         <option key={status} value={status}>{status}</option>
@@ -352,18 +408,18 @@ export default function EditLeadModal({
                 </div>
                 <div>
                   <label style={labelStyle}>Next Follow Up</label>
-                  <input type="datetime-local" name="nextFollowUpDate" value={formData.nextFollowUpDate} onChange={handleChange} style={{ ...inputStyle, colorScheme: 'dark' }} />
+                  <input type="datetime-local" name="nextFollowUpDate" value={formData.nextFollowUpDate} onChange={handleChange} disabled={isReadOnly} style={{ ...effectiveInputStyle, colorScheme: 'dark' }} />
                 </div>
               </div>
               
               <div style={grid2Col}>
                 <div>
                   <label style={labelStyle}>Remark 1</label>
-                  <textarea name="remark1" value={formData.remark1} onChange={handleChange} style={{ ...inputStyle, height: '50px', minHeight: '50px', resize: 'vertical' }} placeholder="Enter remark..." />
+                  <textarea name="remark1" value={formData.remark1} onChange={handleChange} disabled={isReadOnly} style={{ ...effectiveInputStyle, height: '50px', minHeight: '50px', resize: 'vertical' }} placeholder="Enter remark..." />
                 </div>
                 <div>
                   <label style={labelStyle}>Remark 2</label>
-                  <textarea name="remark2" value={formData.remark2} onChange={handleChange} style={{ ...inputStyle, height: '50px', minHeight: '50px', resize: 'vertical' }} placeholder="Enter remark..." />
+                  <textarea name="remark2" value={formData.remark2} onChange={handleChange} disabled={isReadOnly} style={{ ...effectiveInputStyle, height: '50px', minHeight: '50px', resize: 'vertical' }} placeholder="Enter remark..." />
                 </div>
               </div>
 
@@ -385,7 +441,8 @@ export default function EditLeadModal({
                     <select
                       value={selectedTemplateName}
                       onChange={(e) => setSelectedTemplateName(e.target.value)}
-                      style={{ ...inputStyle, flex: 1 }}
+                      disabled={isReadOnly}
+                      style={{ ...effectiveInputStyle, flex: 1 }}
                     >
                       <option value="">-- Select WhatsApp Template --</option>
                       {whatsappTemplates.map(t => (
@@ -397,20 +454,21 @@ export default function EditLeadModal({
                       <button
                         type="button"
                         onClick={handleSendWhatsAppModal}
+                        disabled={isReadOnly}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
                           gap: '6px',
-                          background: '#22c55e',
+                          background: isReadOnly ? 'rgba(34, 197, 94, 0.4)' : '#22c55e',
                           color: 'var(--text-primary)',
                           border: 'none',
                           padding: '7px 16px',
                           borderRadius: '6px',
                           fontSize: '0.85rem',
                           fontWeight: 600,
-                          cursor: 'pointer',
+                          cursor: isReadOnly ? 'not-allowed' : 'pointer',
                           whiteSpace: 'nowrap',
-                          boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)'
+                          boxShadow: isReadOnly ? 'none' : '0 4px 12px rgba(34, 197, 94, 0.3)'
                         }}
                       >
                         <Send size={14} /> Send WhatsApp
@@ -436,20 +494,20 @@ export default function EditLeadModal({
               <div style={grid3Col}>
                 <div>
                   <label style={labelStyle}>Amount 1 (₹)</label>
-                  <input type="number" name="amount1" value={formData.amount1} onChange={handleChange} style={inputStyle} placeholder="0" />
+                  <input type="number" name="amount1" value={formData.amount1} onChange={handleChange} disabled={isReadOnly} style={effectiveInputStyle} placeholder="0" />
                 </div>
                 <div>
                   <label style={labelStyle}>Amount 2 (₹)</label>
-                  <input type="number" name="amount2" value={formData.amount2} onChange={handleChange} style={inputStyle} placeholder="0" />
+                  <input type="number" name="amount2" value={formData.amount2} onChange={handleChange} disabled={isReadOnly} style={effectiveInputStyle} placeholder="0" />
                 </div>
                 <div>
                   <label style={labelStyle}>Amount 3 (₹)</label>
-                  <input type="number" name="amount3" value={formData.amount3} onChange={handleChange} style={inputStyle} placeholder="0" />
+                  <input type="number" name="amount3" value={formData.amount3} onChange={handleChange} disabled={isReadOnly} style={effectiveInputStyle} placeholder="0" />
                 </div>
                 
                 <div>
                   <label style={labelStyle}>Discount (₹)</label>
-                  <input type="number" name="discount" value={formData.discount} onChange={handleChange} style={inputStyle} placeholder="0" />
+                  <input type="number" name="discount" value={formData.discount} onChange={handleChange} disabled={isReadOnly} style={effectiveInputStyle} placeholder="0" />
                 </div>
                 <div>
                   <label style={labelStyle}>Total Amount</label>
@@ -457,7 +515,7 @@ export default function EditLeadModal({
                 </div>
                 <div>
                   <label style={labelStyle}>Lead Status</label>
-                  <select name="leadStatus" value={formData.leadStatus} onChange={handleChange} style={inputStyle}>
+                  <select name="leadStatus" value={formData.leadStatus} onChange={handleChange} disabled={isReadOnly} style={effectiveInputStyle}>
                     {dropdowns['Lead Status'] && dropdowns['Lead Status'].length > 0 ? (
                       dropdowns['Lead Status'].map(status => (
                         <option key={status} value={status}>{status}</option>
@@ -509,31 +567,33 @@ export default function EditLeadModal({
             onMouseOut={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
             disabled={isSaving}
           >
-            Cancel
+            {isReadOnly ? 'Close' : 'Cancel'}
           </button>
-          <button 
-            type="submit" 
-            form="editLeadForm"
-            className="btn btn-primary"
-            style={{ 
-              padding: '0 24px', 
-              height: '40px', 
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-            disabled={isSaving}
-          >
-            {isSaving ? 'Saving...' : (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-                Save Changes
-              </>
-            )}
-          </button>
+          {!isReadOnly && (
+            <button 
+              type="submit" 
+              form="editLeadForm"
+              className="btn btn-primary"
+              style={{ 
+                padding: '0 24px', 
+                height: '40px', 
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+              disabled={isSaving}
+            >
+              {isSaving ? 'Saving...' : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  Save Changes
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 

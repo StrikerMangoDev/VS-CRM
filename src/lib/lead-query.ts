@@ -40,8 +40,23 @@ export function leadScope(q: LeadQuery, user: SessionUser) {
   if (q.sheet === 'EXTRA_DIALER') conditions.push(Prisma.sql`l."currentModuleId"='EXTRA_DIALER'`)
   if (['MASTER','SALES','RECOVERY'].includes(q.sheet) && !(q.analytics&&q.sheet==='RECOVERY')) conditions.push(Prisma.sql`l."currentModuleId" IS DISTINCT FROM 'EXTRA_DIALER'`)
   if (['SALES','RECOVERY'].includes(q.sheet)) {
-    if(!q.analytics)conditions.push(q.closed ? Prisma.sql`l."leadStatus"='CLOSED'` : Prisma.sql`l."leadStatus"<>'CLOSED'`)
-    conditions.push(user.role === 'ADMIN' || user.department === 'ALL' ? assigned(Prisma.sql`u.department=${q.sheet}`) : assigned(Prisma.sql`u.id=${user.id}`))
+    if(!q.analytics) {
+      conditions.push(q.closed 
+        ? Prisma.sql`(l."leadStatus" LIKE 'CLOSED%' OR (l."paymentStatus"='FULL_PAYMENT' AND coalesce(l."leadStatus",'')<>'IN_PROGRESS'))` 
+        : Prisma.sql`(coalesce(l."leadStatus",'') NOT LIKE 'CLOSED%' AND (l."paymentStatus" IS DISTINCT FROM 'FULL_PAYMENT' OR l."leadStatus"='IN_PROGRESS'))`
+      )
+    }
+    if (q.sheet === 'SALES') {
+      conditions.push(user.role === 'ADMIN'
+        ? Prisma.sql`(EXISTS (SELECT 1 FROM "Assignment" a JOIN "User" u ON u.id=a."userId" WHERE a."leadId"=l.id AND (u.department='SALES' OR (u.role='TL' AND l."recoveryAssignedAt" IS NULL))))`
+        : Prisma.sql`(EXISTS (SELECT 1 FROM "Assignment" a WHERE a."leadId"=l.id AND a."userId"=${user.id}) AND l."recoveryAssignedAt" IS NULL)`
+      )
+    } else if (q.sheet === 'RECOVERY') {
+      conditions.push(user.role === 'ADMIN'
+        ? Prisma.sql`(EXISTS (SELECT 1 FROM "Assignment" a JOIN "User" u ON u.id=a."userId" WHERE a."leadId"=l.id AND (u.department='RECOVERY' OR (u.role='TL' AND l."recoveryAssignedAt" IS NOT NULL))))`
+        : Prisma.sql`(EXISTS (SELECT 1 FROM "Assignment" a WHERE a."leadId"=l.id AND a."userId"=${user.id}) AND l."recoveryAssignedAt" IS NOT NULL)`
+      )
+    }
   }
   if (['PART_PAYMENT','FULL_PAYMENT'].includes(q.sheet)) conditions.push(Prisma.sql`l."paymentStatus"=${q.sheet}`)
   if(q.sheet==='ANALYTICS'&&user.role==='EXEC')conditions.push(assigned(Prisma.sql`u.id=${user.id}`))
