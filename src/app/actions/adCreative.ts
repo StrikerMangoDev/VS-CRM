@@ -219,7 +219,8 @@ export async function updateAdCreativeRecordAction(
 
     // Approval permission check
     if (data.approval !== undefined && data.approval !== existing.approval) {
-      if (!canApprove) {
+      const isRevisionResend = existing.approval === 'Revision' && data.approval === 'Pending'
+      if (!canApprove && !isRevisionResend) {
         return { error: 'Permission denied: Only Manager or Admin can update approval.' }
       }
     }

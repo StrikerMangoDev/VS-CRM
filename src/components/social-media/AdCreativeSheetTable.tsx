@@ -409,6 +409,8 @@ function AdCreativeSheetTable({
         showToast(`❌ Error: ${res.error}`);
         // Revert on error
         setRecords(initialRecords);
+      } else if (isRevisionResend) {
+        showToast('✅ Resent for approval (Revised)');
       }
     } catch (err) {
       showToast(`❌ Error: ${(err instanceof Error ? err.message : String(err))}`);
