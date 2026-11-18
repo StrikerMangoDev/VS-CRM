@@ -157,6 +157,16 @@ export async function updateLeadAction(formData: FormData) {
   const email = formData.get('email') as string || null
   const state = formData.get('state') as string || null
   const mobileNumber = formData.get('mobileNumber') as string
+
+  // Only Admin and Sales TL can edit basic lead details (name, mobile, email, state)
+  const isEditingDetails = (name && name !== existingLead.name) || (mobileNumber && mobileNumber !== existingLead.mobileNumber) || (email !== existingLead.email) || (state !== existingLead.state);
+  if (isEditingDetails) {
+    const isSalesTL = (actor.role === 'TL' || actor.role === 'MANAGER') && (actor.department === 'SALES' || actor.mainDepartment === 'Sales Department');
+    const isAdmin = actor.role === 'ADMIN';
+    if (!isAdmin && !isSalesTL) {
+      throw new Error('Only Admin and Sales TL can edit lead details');
+    }
+  }
   const partPaymentAmount = Number(formData.get('partPaymentAmount') || 0)
   const fullPaymentAmount = Number(formData.get('fullPaymentAmount') || 0)
   const totalPayment = Number(formData.get('totalPayment') || 0)
@@ -942,6 +952,10 @@ export async function updateLeadCallStatusAction(id: string, callStatus: string)
 export async function updateLeadCompleteAction(
   leadId: string,
   data: {
+    name?: string
+    mobileNumber?: string
+    email?: string | null
+    state?: string | null
     callStatus?: string
     nextFollowUpDate?: Date | null
     remark1?: string | null
@@ -971,10 +985,28 @@ export async function updateLeadCompleteAction(
       throw new Error('Edit access is restricted for executives on closed or full payment leads')
     }
   }
+
+  // Only Admin and Sales TL can edit basic lead details (name, mobile, email, state)
+  const isEditingDetails = data.name !== undefined || data.mobileNumber !== undefined || data.email !== undefined || data.state !== undefined;
+  if (isEditingDetails) {
+    const isSalesTL = (actor.role === 'TL' || actor.role === 'MANAGER') && (actor.department === 'SALES' || actor.mainDepartment === 'Sales Department');
+    const isAdmin = actor.role === 'ADMIN';
+    if (!isAdmin && !isSalesTL) {
+      throw new Error('Only Admin and Sales TL can edit lead details');
+    }
+  }
+
+  if (data.name !== undefined && !data.name.trim()) throw new Error('Lead name cannot be empty');
+  if (data.mobileNumber !== undefined && !data.mobileNumber.trim()) throw new Error('Mobile number cannot be empty');
+
   if ([data.amount1, data.amount2, data.amount3, data.discount, data.totalPayment].some(n => n != null && (!Number.isFinite(n) || n < 0))) throw new Error('Invalid amount');
   if (data.nextFollowUpDate && !Number.isFinite(data.nextFollowUpDate.getTime())) throw new Error('Invalid follow-up date');
 
   const dataToUpdate: import('@prisma/client').Prisma.LeadUncheckedUpdateInput = {
+    ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+    ...(data.mobileNumber !== undefined ? { mobileNumber: data.mobileNumber.trim() } : {}),
+    ...(data.email !== undefined ? { email: data.email ? data.email.trim() : null } : {}),
+    ...(data.state !== undefined ? { state: data.state ? data.state.trim() : null } : {}),
     callStatus: data.callStatus,
     nextFollowUpDate: data.nextFollowUpDate,
     remark1: data.remark1,
@@ -1008,6 +1040,10 @@ export async function updateLeadCompleteAction(
   // Compute diffs for history
   const changes = []
   const fieldMap: Record<string,string> = {
+    name: 'Name',
+    mobileNumber: 'Mobile Number',
+    email: 'Email',
+    state: 'State',
     callStatus: 'Call Status',
     nextFollowUpDate: 'Next Follow Up',
     remark1: 'Remark 1',
@@ -1044,7 +1080,28 @@ export async function updateLeadCompleteAction(
   const savedLead = await prisma.lead.update({
     where: { id: leadId },
     data: dataToUpdate,
-    select: { id: true, callStatus: true, nextFollowUpDate: true, remark1: true, remark2: true, amount1: true, amount2: true, amount3: true, discount: true, totalPayment: true, salesAmount: true, recoveryAmount: true, leadStatus: true, whatsappTemplate: true, whatsappSentAt: true, updatedAt: true }
+    select: { 
+      id: true, 
+      name: true,
+      mobileNumber: true,
+      email: true,
+      state: true,
+      callStatus: true, 
+      nextFollowUpDate: true, 
+      remark1: true, 
+      remark2: true, 
+      amount1: true, 
+      amount2: true, 
+      amount3: true, 
+      discount: true, 
+      totalPayment: true, 
+      salesAmount: true, 
+      recoveryAmount: true, 
+      leadStatus: true, 
+      whatsappTemplate: true, 
+      whatsappSentAt: true, 
+      updatedAt: true 
+    }
   })
 
   revalidatePath('/')

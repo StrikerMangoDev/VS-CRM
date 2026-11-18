@@ -27,6 +27,10 @@ export default function EditLeadModal({
   onSaveSuccess: (updatedLead: Partial<import('@prisma/client').Lead>&{id:string}) => void
 }) {
   const defaultFormData = {
+    name: lead.name || '',
+    mobileNumber: lead.mobileNumber || '',
+    email: lead.email || '',
+    state: lead.state || '',
     callStatus: lead.callStatus || 'UNTOUCHED',
     nextFollowUpDate: lead.nextFollowUpDate ? (function() {
       const d = new Date(lead.nextFollowUpDate);
@@ -51,6 +55,16 @@ export default function EditLeadModal({
   )
   const isExecutive = !isAdmin && userRole !== 'TL' && userRole !== 'ADMIN'
   const isReadOnly = isExecutive && isLeadClosed
+
+  const isSalesTL = userRole === 'TL' && (
+    updaterDepartment === 'SALES' || 
+    updaterDepartment === 'TL' || 
+    updaterDepartment === 'Sales Department' || 
+    updaterDepartment === 'ADMIN' || 
+    updaterDepartment === 'MASTER' ||
+    !updaterDepartment
+  )
+  const canEditDetails = (isAdmin || userRole === 'ADMIN' || isSalesTL) && !isReadOnly
   
   // WhatsApp Template in Modal (Sales & Recovery Departments)
   const isSalesDept = updaterDepartment === 'SALES' || updaterDepartment === 'Sales Department' || updaterDepartment === 'RECOVERY' || isAdmin
@@ -71,11 +85,11 @@ export default function EditLeadModal({
   const personalizeMessage = (templateText: string) => {
     if (!templateText) return ''
     return templateText
-      .replace(/\{name\}/g, lead.name || '')
-      .replace(/\{mobile\}/g, lead.mobileNumber || '')
-      .replace(/\{email\}/g, lead.email || '')
+      .replace(/\{name\}/g, formData.name || lead.name || '')
+      .replace(/\{mobile\}/g, formData.mobileNumber || lead.mobileNumber || '')
+      .replace(/\{email\}/g, formData.email || lead.email || '')
       .replace(/\{webinarId\}/g, lead.webinarId || '')
-      .replace(/\{state\}/g, lead.state || '')
+      .replace(/\{state\}/g, formData.state || lead.state || '')
       .replace(/\{amount\}/g, lead.partPaymentAmount ? `₹${lead.partPaymentAmount}` : (lead.totalPayment ? `₹${lead.totalPayment}` : ''));
   }
 
@@ -143,11 +157,23 @@ export default function EditLeadModal({
       alert('Edit access is restricted for executives on closed or full payment leads.')
       return
     }
+
+    if (canEditDetails) {
+      if (!formData.name.trim()) {
+        alert('Lead name is required.')
+        return
+      }
+      if (!formData.mobileNumber.trim()) {
+        alert('Mobile number is required.')
+        return
+      }
+    }
+
     setIsSaving(true)
     let savedLead: Awaited<ReturnType<typeof updateLeadCompleteAction>>
     
     try {
-      savedLead = await updateLeadCompleteAction(lead.id, {
+      const payload: Parameters<typeof updateLeadCompleteAction>[1] = {
         callStatus: formData.callStatus,
         nextFollowUpDate: formData.nextFollowUpDate ? new Date(formData.nextFollowUpDate) : null,
         remark1: formData.remark1,
@@ -160,7 +186,16 @@ export default function EditLeadModal({
         updaterDepartment,
         leadStatus: formData.leadStatus,
         whatsappTemplate: selectedTemplateName || null
-      })
+      }
+
+      if (canEditDetails) {
+        payload.name = formData.name.trim()
+        payload.mobileNumber = formData.mobileNumber.trim()
+        payload.email = formData.email.trim() || null
+        payload.state = formData.state.trim() || null
+      }
+
+      savedLead = await updateLeadCompleteAction(lead.id, payload)
       
     } catch (err) {
       console.error(err)
@@ -292,7 +327,7 @@ export default function EditLeadModal({
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '0.85rem' }}>
               <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>{lead.uniqueId}</span>
               <span style={{ color: 'var(--text-muted)' }}>•</span>
-              <span style={{ color: 'var(--text-primary)' }}>{lead.name}</span>
+              <span style={{ color: 'var(--text-primary)' }}>{formData.name || lead.name}</span>
               {lead.leadStatus && (
                 <>
                   <span style={{ color: 'var(--text-muted)' }}>•</span>
@@ -359,23 +394,71 @@ export default function EditLeadModal({
             
             {/* 1. LEAD & WEBINAR */}
             <div style={sectionStyle}>
-              <div style={sectionTitleStyle}>1. LEAD & WEBINAR</div>
+              <div style={sectionTitleStyle}>
+                1. LEAD & WEBINAR {canEditDetails && <span style={{ fontSize: '0.7rem', color: '#60a5fa', fontWeight: 'normal', textTransform: 'none' }}>(Editable for Admin & Sales TL)</span>}
+              </div>
               <div style={{...grid2Col, marginBottom: '12px'}}>
                 <div>
-                  <label style={labelStyle}>Name</label>
-                  <div style={readOnlyTextStyle}>{lead.name}</div>
+                  <label style={labelStyle}>Name {canEditDetails && <span style={{ color: '#ef4444' }}>*</span>}</label>
+                  {canEditDetails ? (
+                    <input
+                      type="text"
+                      name="name"
+                      value={formData.name}
+                      onChange={handleChange}
+                      required
+                      style={effectiveInputStyle}
+                      placeholder="Enter name"
+                    />
+                  ) : (
+                    <div style={readOnlyTextStyle}>{lead.name}</div>
+                  )}
                 </div>
                 <div>
-                  <label style={labelStyle}>Mobile</label>
-                  <div style={readOnlyTextStyle}>{lead.mobileNumber}</div>
+                  <label style={labelStyle}>Mobile {canEditDetails && <span style={{ color: '#ef4444' }}>*</span>}</label>
+                  {canEditDetails ? (
+                    <input
+                      type="tel"
+                      name="mobileNumber"
+                      value={formData.mobileNumber}
+                      onChange={handleChange}
+                      required
+                      style={effectiveInputStyle}
+                      placeholder="Enter mobile number"
+                    />
+                  ) : (
+                    <div style={readOnlyTextStyle}>{lead.mobileNumber}</div>
+                  )}
                 </div>
                 <div>
                   <label style={labelStyle}>Email</label>
-                  <div style={readOnlyTextStyle}>{lead.email || '-'}</div>
+                  {canEditDetails ? (
+                    <input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleChange}
+                      style={effectiveInputStyle}
+                      placeholder="Enter email"
+                    />
+                  ) : (
+                    <div style={readOnlyTextStyle}>{lead.email || '-'}</div>
+                  )}
                 </div>
                 <div>
                   <label style={labelStyle}>State</label>
-                  <div style={readOnlyTextStyle}>{lead.state || '-'}</div>
+                  {canEditDetails ? (
+                    <input
+                      type="text"
+                      name="state"
+                      value={formData.state}
+                      onChange={handleChange}
+                      style={effectiveInputStyle}
+                      placeholder="Enter state"
+                    />
+                  ) : (
+                    <div style={readOnlyTextStyle}>{lead.state || '-'}</div>
+                  )}
                 </div>
               </div>
               <div>

@@ -5,7 +5,7 @@ import { useLeadPage,usePageNumber,allMatchingLeads,dateBounds } from '@/hooks/u
 import type { LeadPage,LeadQuery,LeadBulkOption } from '@/lib/lead-query'
 
 import React,{ useState,useEffect,useRef } from 'react'
-import { updateLeadAction,assignLeadAction,bulkAssignLeadsAction,deleteLeadAction,unassignLeadAction,bulkDeleteLeadsAction } from '@/app/actions/lead'
+import { assignLeadAction,bulkAssignLeadsAction,deleteLeadAction,unassignLeadAction,bulkDeleteLeadsAction } from '@/app/actions/lead'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { initiateCallAction,checkCallStatusAction,saveCallLogAction } from '@/app/actions/call'
@@ -241,8 +241,7 @@ function MasterLeadTable({
   const queryFilters: LeadQuery = { sheet: sheetName === 'EXTRA_DIALER' ? 'EXTRA_DIALER' : 'MASTER', search: searchQuery, webinar: filterWebinar, payment: filterPaymentStatus, call: filterCallStatus, log: filterLogStatus, state: filterState, whatsapp: filterWhatsapp, team: filterTeam, executive: filterExecutive, ...dateBounds(filterDateRange,filterStartDate,filterEndDate,filterNow), sort: sortColumn, direction: sortDirection }
   const [requestedPage, setRequestedPage] = usePageNumber(JSON.stringify({...queryFilters,size:pageSize}))
   const query = {...queryFilters,page:requestedPage,size:pageSize}
-  const pageData = useLeadPage(initialPage,query)
-  const leads = pageData.rows
+  const { rows: leads, setRows, ...pageData } = useLeadPage(initialPage,query)
   const currentPage = Math.min(requestedPage,Math.max(1,Math.ceil(pageData.total/pageSize)))
   const setCurrentPage = (next: number | ((page:number)=>number)) => setRequestedPage(typeof next==='function'?next(currentPage):next)
   const [bulkLeads,setBulkLeads] = useState<LeadBulkOption[]>([])
@@ -1098,125 +1097,6 @@ function MasterLeadTable({
         </div>
       </div>
 
-      {/* Edit Lead Modal */}
-      {editingLead && (
-        <div style={modalOverlayStyle}>
-          <div className="glass-panel" style={modalContentStyle}>
-            <h2 style={modalHeaderStyle}>Edit Lead: {editingLead.uniqueId}</h2>
-            
-            <form action={async (formData) => {
-              try {
-                await updateLeadAction(formData)
-                toast.success('Lead updated successfully')
-                setEditingLead(null)
-              } catch {
-                toast.error('Failed to update lead')
-              }
-            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <input type="hidden" name="id" value={editingLead.id} />
-              
-              <div>
-                <label style={labelStyle}>Name</label>
-                <input name="name" type="text" defaultValue={editingLead.name} required style={inputStyle} />
-              </div>
-
-              <div>
-                <label style={labelStyle}>Webinar ID</label>
-                <input name="webinarId" type="text" defaultValue={editingLead.webinarId || editingLead.webinarName || ''} style={inputStyle} />
-              </div>
-              
-              <div>
-                <label style={labelStyle}>Email</label>
-                <input name="email" type="email" defaultValue={editingLead.email || ''} style={inputStyle} />
-              </div>
-
-              <div>
-                <label style={labelStyle}>State</label>
-                <input name="state" type="text" defaultValue={editingLead.state || ''} style={inputStyle} />
-              </div>
-
-              <div>
-                <label style={labelStyle}>Mobile Number</label>
-                <input name="mobileNumber" type="text" defaultValue={editingLead.mobileNumber} required style={inputStyle} />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
-                <div>
-                  <label style={labelStyle}>Total Paid (₹)</label>
-                  <input name="totalPayment" type="number" step="0.01" defaultValue={editingLead.totalPayment} required style={inputStyle} />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={labelStyle}>Part Payment (₹)</label>
-                  <input name="partPaymentAmount" type="number" step="0.01" defaultValue={editingLead.partPaymentAmount} required style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Full Payment (₹)</label>
-                  <input name="fullPaymentAmount" type="number" step="0.01" defaultValue={editingLead.fullPaymentAmount} required style={inputStyle} />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={labelStyle}>Sales Amount (₹)</label>
-                  <input name="salesAmount" type="number" step="0.01" defaultValue={editingLead.salesAmount || 0} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Recovery Amount (₹)</label>
-                  <input name="recoveryAmount" type="number" step="0.01" defaultValue={editingLead.recoveryAmount || 0} style={inputStyle} />
-                </div>
-              </div>
-
-
-
-              {customColumns.length > 0 && (
-                <div style={{ marginTop: '16px', padding: '16px', background: 'var(--table-hover)', borderRadius: '8px' }}>
-                  <h3 style={{ color: 'var(--foreground)', fontSize: '1rem', marginTop: 0, marginBottom: '16px' }}>Custom Fields</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                    {customColumns.map(col => {
-                      let val = ''
-                      try {
-                        const parsed = JSON.parse(editingLead.customData || '{}')
-                        val = parsed[col.name] || ''
-                      } catch {}
-                      return (
-                        <div key={col.id}>
-                          <label style={labelStyle}>{col.name}</label>
-                          <input 
-                            name={`custom_${col.name}`} 
-                            type={col.type === 'NUMBER' ? 'number' : col.type === 'DATE' ? 'date' : 'text'} 
-                            defaultValue={val} 
-                            style={inputStyle} 
-                          />
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <input type="hidden" name="customData" id="customDataInput" value={editingLead.customData || "{}"} />
-
-              <div style={modalActionRowStyle}>
-                <button type="button" onClick={() => setEditingLead(null)} className="btn" style={{ background: 'transparent', color: 'var(--text-muted)' }}>Cancel</button>
-                <button type="submit" onClick={() => {
-                  // Reconstruct customData string before submit
-                  const obj: Record<string,string> = {};
-                  customColumns.forEach(col => {
-                    const el = document.querySelector(`[name="custom_${col.name}"]`) as HTMLInputElement;
-                    if (el) obj[col.name] = el.value;
-                  });
-                  const hiddenInput = document.getElementById('customDataInput') as HTMLInputElement;
-                  if (hiddenInput) hiddenInput.value = JSON.stringify(obj);
-                }} className="btn btn-primary">Save Changes</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Assign Lead Modal */}
       {(assigningLead || isBulkAssigning) && (
         <div style={modalOverlayStyle}>
@@ -1443,7 +1323,11 @@ function MasterLeadTable({
           userRole={isTL ? 'TL' : (isAdmin ? 'ADMIN' : 'EXEC')}
           updaterDepartment={isAdmin ? 'ADMIN' : (isTL ? 'TL' : 'SALES')}
           dropdowns={dropdowns}
-          onSaveSuccess={() => {setEditingLead(null)}} 
+          onSaveSuccess={(updatedLead) => {
+            setRows(prev => prev.map(l => l.id === updatedLead.id ? { ...l, ...updatedLead } : l))
+            setEditingLead(null)
+            router.refresh()
+          }} 
         />
       )}
       {activeCallLead && (
