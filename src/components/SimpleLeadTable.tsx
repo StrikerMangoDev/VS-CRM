@@ -74,28 +74,59 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
   const displayedLeads=leads
 
   const exportToCSV = async () => {
-    const exportLeads=await allMatchingLeads(query)
-    const headers = ['Lead ID', 'Name', 'Email', 'Mobile', 'Webinar ID', 'State', 'Call Status', 'Remark 1', 'Remark 2', 'Next Follow Up', sheetName === 'PART_PAYMENT' ? 'Part Payment' : sheetName === 'FULL_PAYMENT' ? 'Full Payment' : 'Total Paid'];
+    const exportLeads = await allMatchingLeads(query)
+    const headers = [
+      'Lead ID',
+      'Name',
+      'Email',
+      'Mobile',
+      'Webinar ID',
+      'State',
+      sheetName === 'PART_PAYMENT' ? 'Part Payment' : sheetName === 'FULL_PAYMENT' ? 'Full Payment' : 'Total Paid'
+    ];
     if (sheetName === 'PART_PAYMENT') {
       headers.push('Part Payment Date');
     }
-    const rows = exportLeads.filter(lead => !lead.leadStatus?.startsWith('CLOSED')).map(lead => {
+    headers.push('Call Status', 'Remark 1', 'Remark 2', 'Next Follow Up', 'Lead Owner', 'Lead Status');
+    customColumns.forEach(col => {
+      headers.push(col.name);
+    });
+
+    const rows = exportLeads.map(lead => {
       const baseRow = [
         sheetName === 'PART_PAYMENT' ? (lead.partPaymentId || lead.uniqueId) : sheetName === 'FULL_PAYMENT' ? (lead.fullPaymentId || lead.uniqueId) : lead.uniqueId,
         lead.name,
         lead.email || '-',
         lead.mobileNumber,
-        lead.webinarName || '-',
+        lead.webinarId || lead.webinarName || '-',
         lead.state || '-',
+        (lead.partPaymentAmount || lead.totalPayment || 0).toString()
+      ];
+      if (sheetName === 'PART_PAYMENT') {
+        const dateStr = lead.paymentDate ? (() => {
+          const d = new Date(lead.paymentDate);
+          return `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear()}`;
+        })() : '-';
+        baseRow.push(dateStr);
+      }
+      baseRow.push(
         lead.callStatus || 'UNTOUCHED',
         lead.remark1 || '-',
         lead.remark2 || '-',
         lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString('en-GB') : '-',
-        lead.totalPayment.toString()
-      ];
-      if (sheetName === 'PART_PAYMENT') {
-        baseRow.push(lead.paymentDate ? new Date(lead.paymentDate).toLocaleDateString('en-GB') : '-');
-      }
+        lead.assignments && lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').length > 0
+          ? lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').map((a) => `${a.user.name} (${a.user.department})`).join('; ')
+          : 'Unassigned',
+        lead.leadStatus === 'CLOSED_FULL_PAYMENT' ? 'Full Payment Done (Close)' : lead.leadStatus?.startsWith('CLOSED') ? 'Closed Lead' : (lead.leadStatus || 'In Progress')
+      );
+      customColumns.forEach(col => {
+        let val = '-';
+        try {
+          const parsed = JSON.parse(lead.customData || '{}');
+          val = parsed[col.name] || parsed[col.id] || '-';
+        } catch {}
+        baseRow.push(val);
+      });
       return baseRow;
     });
 
@@ -104,7 +135,7 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `leads_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `${sheetName.toLowerCase().replace(/_/g, '-')}_leads_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

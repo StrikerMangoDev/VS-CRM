@@ -421,7 +421,7 @@ function MasterLeadTable({
   const exportToCSV = async () => {
     const exportLeads = await allMatchingLeads(queryFilters)
     const headers = ['Lead ID', 'Name', 'Email', 'Mobile', 'Webinar ID', 'State', 'Call Status', 'Remark 1', 'Remark 2', 'Next Follow Up', 'Part Payment', 'Full Payment', 'Discount', 'Sales Amount', 'Recovery Amount', 'Total Paid', 'WhatsApp', 'LEAD OWNER', 'Lead Status'];
-    const rows = exportLeads.filter(lead => !lead.leadStatus?.startsWith('CLOSED')).map(lead => [
+    const rows = exportLeads.map(lead => [
       lead.uniqueId,
       lead.name,
       lead.email || '-',
