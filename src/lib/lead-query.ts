@@ -65,8 +65,13 @@ export function leadScope(q: LeadQuery, user: SessionUser) {
 export function leadFilters(q: LeadQuery) {
   const conditions: Prisma.Sql[] = []
   if(q.ids)conditions.push(q.ids.length?Prisma.sql`l.id=ANY(${q.ids}::text[])`:Prisma.sql`FALSE`)
-  const master = ['MASTER','EXTRA_DIALER'].includes(q.sheet)
-  if (q.search) conditions.push(q.sheet==='PORTAL' ? contains('customData',q.search) : Prisma.sql`(${Prisma.join((master ? ['uniqueId','name','mobileNumber','email','state'] : ['uniqueId','name','mobileNumber','email']).map(name=>contains(name,q.search!)), ' OR ')} ${master ? Prisma.sql`OR strpos(lower(coalesce(${webinar},'')),lower(${q.search}))>0` : Prisma.empty})`)
+  const master = ['MASTER','EXTRA_DIALER','PART_PAYMENT','FULL_PAYMENT'].includes(q.sheet)
+  const searchFields = q.sheet === 'PART_PAYMENT'
+    ? ['uniqueId','partPaymentId','name','mobileNumber','email','state']
+    : q.sheet === 'FULL_PAYMENT'
+      ? ['uniqueId','fullPaymentId','name','mobileNumber','email','state']
+      : (master ? ['uniqueId','name','mobileNumber','email','state'] : ['uniqueId','name','mobileNumber','email'])
+  if (q.search) conditions.push(q.sheet==='PORTAL' ? contains('customData',q.search) : Prisma.sql`(${Prisma.join(searchFields.map(name=>contains(name,q.search!)), ' OR ')} ${master ? Prisma.sql`OR strpos(lower(coalesce(${webinar},'')),lower(${q.search}))>0` : Prisma.empty})`)
   if(q.sheet==='PORTAL'&&q.portalColumn&&q.portalValue)conditions.push(Prisma.sql`strpos(lower(coalesce((CASE WHEN l."customData" IS JSON OBJECT THEN l."customData"::json ELSE '{}'::json END)->>${q.portalColumn},'')),lower(${q.portalValue}))>0`)
   if (q.webinar) conditions.push(['PART_PAYMENT','FULL_PAYMENT'].includes(q.sheet) ? Prisma.sql`(l."webinarId"=${q.webinar} OR l."webinarName"=${q.webinar})` : Prisma.sql`${webinar}=${q.webinar}`)
   for (const [key,name] of [['payment','paymentStatus'],['state','state'],['leadStatus','leadStatus']] as const) if(q[key] && q[key]!=='all') conditions.push(Prisma.sql`${field(name)}=${q[key]}`)

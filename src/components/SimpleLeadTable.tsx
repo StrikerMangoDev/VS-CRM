@@ -9,7 +9,7 @@ import 'react-datepicker/dist/react-datepicker.css'
 import AddColumnModal from '@/components/AddColumnModal'
 import { deleteCustomColumnAction } from '@/app/actions/column'
 import { removeLeadFromSheetAction } from '@/app/actions/lead'
-import { Trash2 } from 'lucide-react'
+import { Search, X, Trash2 } from 'lucide-react'
 import { useConfirm } from '@/providers/ConfirmProvider'
 
 type LeadData = {
@@ -38,6 +38,7 @@ type LeadData = {
 }
 
 export default function SimpleLeadTable({ initialPage, isAdmin = false, customColumns = [], sheetName = 'SIMPLE' }: { initialPage: LeadPage, isAdmin?: boolean, customColumns?: import('@prisma/client').CustomColumn[], sheetName?: string }) {
+  const [searchQuery, setSearchQuery] = useState('')
   const [filterWebinar, setFilterWebinar] = useState('')
   const [filterState, setFilterState] = useState('')
   const [filterDateRange, setFilterDateRange] = useState('')
@@ -45,7 +46,14 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null)
 
   const [filterNow] = useState(()=>new Date())
-  const query:LeadQuery={sheet:sheetName==='PART_PAYMENT'?'PART_PAYMENT':'FULL_PAYMENT',webinar:filterWebinar,state:filterState,...dateBounds(filterDateRange,filterStartDate,filterEndDate,filterNow),size:50}
+  const query:LeadQuery={
+    sheet:sheetName==='PART_PAYMENT'?'PART_PAYMENT':'FULL_PAYMENT',
+    search:searchQuery.trim() || undefined,
+    webinar:filterWebinar,
+    state:filterState,
+    ...dateBounds(filterDateRange,filterStartDate,filterEndDate,filterNow),
+    size:50
+  }
   const [pageData,sentinel]=useInfiniteLeadPage(initialPage,query)
   const leads=pageData.rows
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set())
@@ -175,6 +183,28 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
   return (
     <>
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center', background: 'var(--card-bg)', padding: '16px', borderRadius: '12px', border: '1px solid var(--card-border)', position: 'relative', zIndex: 50 }}>
+        {/* Search Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', background: 'var(--table-header-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', minWidth: '260px', padding: '0 10px', height: '36px' }}>
+          <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0, marginRight: '8px' }} />
+          <input 
+            type="text" 
+            placeholder="Search by ID, Name, Mobile, Email..." 
+            value={searchQuery} 
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{ border: 'none', background: 'transparent', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', width: '100%', fontFamily: 'inherit' }} 
+          />
+          {searchQuery && (
+            <button 
+              type="button" 
+              onClick={() => setSearchQuery('')}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px', display: 'flex' }}
+              title="Clear search"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
         <select value={filterWebinar} onChange={e => setFilterWebinar(e.target.value)} style={filterInputStyle}>
           <option value="">All Webinars</option>
           {pageData.options.webinars.map(w => (
@@ -219,6 +249,7 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginLeft: 'auto' }}>
           <button 
             onClick={() => {
+              setSearchQuery('')
               setFilterWebinar('')
               setFilterState('')
               setFilterDateRange('')
