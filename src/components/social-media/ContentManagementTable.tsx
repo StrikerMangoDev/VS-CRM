@@ -127,8 +127,10 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
         scheduleVideo: record.scheduleVideo || false,
         uploadingTime: record.uploadingTime || '',
         storyStatus: record.storyStatus || 'Pending',
-        editorId: (record.graphicDesignerId || record.editorId) || '',
-        graphicDesignerId: (record.graphicDesignerId || record.editorId) || '',
+        editorId: (isGraphicsSheet || ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo', 'Graphics Task'].includes(record.format))
+          ? (record.graphicDesignerId || record.editorId || '')
+          : (record.editorId || ''),
+        graphicDesignerId: record.graphicDesignerId || '',
         doneDate: record.doneDate ? new Date(new Date(record.doneDate).getTime() - new Date(record.doneDate).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '',
         approvalDate: record.approvalDate ? new Date(new Date(record.approvalDate).getTime() - new Date(record.approvalDate).getTimezoneOffset() * 60000).toISOString().split('T')[0] : '',
         postOnDate: record.postOnDate ? new Date(new Date(record.postOnDate).getTime() - new Date(record.postOnDate).getTimezoneOffset() * 60000).toISOString().split('T')[0] : '',
@@ -140,14 +142,13 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
       const now = new Date();
       const localNow = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
       const isGraphicsTab = dataType === 'Graphics' || isGraphicsSheet || currentUserDepartment === 'Graphics Team';
-      const defaultAssignee = currentUserDepartment === 'Graphics Team' 
-        ? (currentUserId || '') 
-        : (!isGraphicsTab && currentUserDepartment === 'Editing Team' ? (currentUserId || '') : '');
+      const defaultEditor = !isGraphicsTab && currentUserDepartment === 'Editing Team' ? (currentUserId || '') : '';
+      const defaultGraphicDesigner = isGraphicsTab && currentUserDepartment === 'Graphics Team' ? (currentUserId || '') : '';
       setFormData({ 
         ...initialFormState, 
         format: isGraphicsTab ? 'Graphics Task' : 'Long Video',
-        editorId: defaultAssignee, 
-        graphicDesignerId: defaultAssignee, 
+        editorId: defaultEditor, 
+        graphicDesignerId: defaultGraphicDesigner, 
         doneDate: localNow, 
         thumbnailDoneDate: isThumbnailSheet ? localNow : '' 
       });
@@ -184,11 +185,11 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
     }
     
     const isGraphicsItem = dataType === 'Graphics' || isGraphicsSheet || ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo', 'Graphics Task'].includes(formData.format);
-    const assignedId = formData.graphicDesignerId || formData.editorId || '';
 
     if (editingRecord) {
       const payload = { ...formData };
       if (isGraphicsItem) {
+        const assignedId = formData.graphicDesignerId || formData.editorId || '';
         payload.graphicDesignerId = assignedId;
         payload.editorId = assignedId;
       }
@@ -205,6 +206,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
         if (!payload.format || payload.format === 'Long Video') {
           payload.format = 'Graphics Task';
         }
+        const assignedId = formData.graphicDesignerId || formData.editorId || '';
         payload.graphicDesignerId = assignedId;
         payload.editorId = assignedId;
       }
@@ -624,6 +626,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                 )}
                 
                 {(!isWorkingSheet && !isThumbnailSheet && !isGraphicsSheet && dataType !== 'Graphics') && <th style={thStyle}>Thumbnail Link</th>}
+                {(!isWorkingSheet && !isThumbnailSheet && !isGraphicsSheet && dataType !== 'Graphics') && <th style={thStyle}>Thumbnail Designer</th>}
                 {(isThumbnailSheet || (isManagerWorkspace && dataType !== 'Graphics')) && <th style={thStyle}>Thumbnail Count</th>}
                 {isThumbnailSheet && <th style={thStyle}>Thumbnail</th>}
                 {isThumbnailSheet && <th style={thStyle}>Thumbnail Done Date</th>}
@@ -676,7 +679,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
             <tbody>
               {paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan={isWorkingSheet ? 9 : (isThumbnailSheet ? 11 : (isPostingSheet ? 11 : 21))} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={isWorkingSheet ? 9 : (isThumbnailSheet ? 11 : (isPostingSheet ? 11 : 25))} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     No content records found.
                   </td>
                 </tr>
@@ -716,6 +719,20 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                   
                   {(!isWorkingSheet && !isThumbnailSheet && !isGraphicsSheet && dataType !== 'Graphics') && (
                     <td style={tdStyle}>{row.thumbnail ? <a href={row.thumbnail} target="_blank" rel="noopener noreferrer" style={{ color: '#ec4899', display: 'flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}><Eye size={14} /> Preview</a> : '-'}</td>
+                  )}
+                  {(!isWorkingSheet && !isThumbnailSheet && !isGraphicsSheet && dataType !== 'Graphics') && (
+                    <td style={tdStyle}>
+                      {row.graphicDesigner ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'linear-gradient(135deg, #ec4899, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700 }}>
+                            {row.graphicDesigner.name?.[0] || '?'}
+                          </div>
+                          <span>{row.graphicDesigner.name}</span>
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>Unassigned</span>
+                      )}
+                    </td>
                   )}
                   {(isThumbnailSheet || (isManagerWorkspace && dataType !== 'Graphics')) && (
                     <td style={tdStyle}>{row.thumbnailCount || '-'}</td>
@@ -1063,20 +1080,29 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                     <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
                       {dataType === 'Graphics' || ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo', 'Graphics Task'].includes(formData.format) ? 'Graphic Editor' : 'Editor Name'}
                     </label>
-                    <select 
-                      value={formData.graphicDesignerId || formData.editorId || ''} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setFormData(prev => ({ ...prev, editorId: val, graphicDesignerId: val }));
-                      }} 
-                      disabled={isWorkingSheet || isThumbnailSheet || isManagerRestricted}
-                      style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--card-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--text-primary)', opacity: (isWorkingSheet || isThumbnailSheet || isManagerRestricted) ? 0.7 : 1, cursor: (isWorkingSheet || isThumbnailSheet || isManagerRestricted) ? 'not-allowed' : 'pointer' }}
-                    >
-                      <option value="">
-                        {dataType === 'Graphics' || ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo', 'Graphics Task'].includes(formData.format) ? 'Select Graphic Editor...' : 'Select Editor...'}
-                      </option>
-                      {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.department || u.mainDepartment})</option>)}
-                    </select>
+                    {(() => {
+                      const isGraphics = dataType === 'Graphics' || ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo', 'Graphics Task'].includes(formData.format);
+                      return (
+                        <select 
+                          value={isGraphics ? (formData.graphicDesignerId || formData.editorId || '') : (formData.editorId || '')} 
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (isGraphics) {
+                              setFormData(prev => ({ ...prev, editorId: val, graphicDesignerId: val }));
+                            } else {
+                              setFormData(prev => ({ ...prev, editorId: val }));
+                            }
+                          }} 
+                          disabled={isWorkingSheet || isThumbnailSheet || isManagerRestricted}
+                          style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--card-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--text-primary)', opacity: (isWorkingSheet || isThumbnailSheet || isManagerRestricted) ? 0.7 : 1, cursor: (isWorkingSheet || isThumbnailSheet || isManagerRestricted) ? 'not-allowed' : 'pointer' }}
+                        >
+                          <option value="">
+                            {isGraphics ? 'Select Graphic Editor...' : 'Select Editor...'}
+                          </option>
+                          {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.department || u.mainDepartment})</option>)}
+                        </select>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -1188,6 +1214,25 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                         <DriveUploadButton disabled={isPostingSheet || isManagerRestricted} onUploadComplete={(url) => setFormData({...formData, thumbnail: url, thumbnailCount: (!formData.thumbnailCount || formData.thumbnailCount === '0') && url.trim() !== '' ? '1' : formData.thumbnailCount})} label="Upload" />
                       </div>
                     </div>
+
+                    {/* 8.0 Thumbnail Designer */}
+                    {(!isWorkingSheet && !isThumbnailSheet && !isPostingSheet) && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Thumbnail Designer</label>
+                        <select 
+                          value={formData.graphicDesignerId || ''} 
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setFormData(prev => ({ ...prev, graphicDesignerId: val }));
+                          }} 
+                          disabled={isManagerRestricted}
+                          style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--card-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--text-primary)', opacity: isManagerRestricted ? 0.7 : 1, cursor: isManagerRestricted ? 'not-allowed' : 'pointer' }}
+                        >
+                          <option value="">Select Thumbnail Designer...</option>
+                          {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.department || u.mainDepartment})</option>)}
+                        </select>
+                      </div>
+                    )}
                     
                     {/* 8.1 Thumbnail Count */}
                     {(isThumbnailSheet || isManagerWorkspace) && (
