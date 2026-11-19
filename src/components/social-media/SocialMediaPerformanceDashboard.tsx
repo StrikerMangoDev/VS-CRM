@@ -9,7 +9,7 @@ PieChart,Pie,Cell,BarChart,Bar,Legend
 import {
 Calendar,ChevronDown,Video,CheckCircle2,Clock,
 ExternalLink,Trophy,AlertCircle,Send,RotateCcw,RefreshCw,
-Palette,Layout,Film,ClipboardList
+Palette,Layout,Film,ClipboardList,Zap,Sparkles,Layers
 } from 'lucide-react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -50,6 +50,7 @@ export default function SocialMediaPerformanceDashboard({
   const [filterEditor, setFilterEditor] = useState('All')
   const [filterTeam, setFilterTeam] = useState('All')
   const [filterFormat, setFilterFormat] = useState('All')
+  const [adminTab, setAdminTab] = useState<'editing' | 'graphics'>('editing')
 
   // Filter tasks dynamically
   const filteredTasks = useMemo(() => {
@@ -90,7 +91,11 @@ export default function SocialMediaPerformanceDashboard({
 
       // Executive isolation
       if (!user.isAdmin && !user.isTL) {
-        if (ac.editorId && ac.editorId !== user.id) return false;
+        const matchesId = ac.editorId && ac.editorId === user.id;
+        const matchesName = ac.editorName && user.name && ac.editorName.toLowerCase().includes(user.name.toLowerCase());
+        if (ac.editorId || ac.editorName) {
+          if (!matchesId && !matchesName) return false;
+        }
       }
 
       // Admin/TL Specific Filters
@@ -203,6 +208,110 @@ export default function SocialMediaPerformanceDashboard({
     }, 0);
   }, [filteredTasks]);
 
+  // --- EDITOR METRICS (For Editing Team) ---
+  // 1. Long Video Count (Editor working sheet where format is Long Video)
+  const longVideoCount = useMemo(() => {
+    return filteredContent.filter((c) => {
+      const isGraphics = c.format === 'Graphics Task' || 
+                         c.uniqueId?.startsWith('GP-') || 
+                         ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo'].includes(c.format);
+      if (isGraphics) return false;
+
+      // Executive isolation
+      if (!user.isAdmin && !user.isTL) {
+        if (c.editorId && c.editorId !== user.id) return false;
+      }
+
+      const fmt = (c.format || '').toLowerCase();
+      return fmt.includes('long') || fmt === 'long video';
+    }).length;
+  }, [filteredContent, user]);
+
+  // 2. Short Video Count (Editor working sheet where format is Short / Reel)
+  const shortVideoCount = useMemo(() => {
+    return filteredContent.filter((c) => {
+      const isGraphics = c.format === 'Graphics Task' || 
+                         c.uniqueId?.startsWith('GP-') || 
+                         ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo'].includes(c.format);
+      if (isGraphics) return false;
+
+      // Executive isolation
+      if (!user.isAdmin && !user.isTL) {
+        if (c.editorId && c.editorId !== user.id) return false;
+      }
+
+      const fmt = (c.format || '').toLowerCase();
+      return fmt.includes('short') || fmt.includes('reel') || fmt === 'short / reel';
+    }).length;
+  }, [filteredContent, user]);
+
+  const totalVideoCount = longVideoCount + shortVideoCount;
+
+  // 3. Ad Creative Count (for editor)
+  const editorAdCreativeCount = useMemo(() => {
+    return filteredAdCreatives.filter((ac) => {
+      if (!user.isAdmin && !user.isTL) {
+        const matchesId = ac.editorId && ac.editorId === user.id;
+        const matchesName = ac.editorName && user.name && ac.editorName.toLowerCase().includes(user.name.toLowerCase());
+        if (ac.editorId || ac.editorName) {
+          if (!matchesId && !matchesName) return false;
+        }
+      }
+      return true;
+    }).length;
+  }, [filteredAdCreatives, user]);
+
+  // 4. Other Task Count (task sheet sum of graphicsCount / records for editor)
+  const editorOtherTaskCount = useMemo(() => {
+    return filteredTasks.reduce((sum, t) => {
+      if (!user.isAdmin && !user.isTL) {
+        if (t.assignedToId && t.assignedToId !== user.id) return sum;
+      }
+      const count = parseInt(t.graphicsCount || '0', 10);
+      return sum + (isNaN(count) || count <= 0 ? 1 : count);
+    }, 0);
+  }, [filteredTasks, user]);
+
+  // 5. Total Work: Videos (Long + Short) + Ad Creative + Other Task
+  const editorTotalWorkCount = totalVideoCount + editorAdCreativeCount + editorOtherTaskCount;
+
+  // 6. Approved Count: approved videos + approved ad creatives + completed/approved tasks
+  const editorApprovedCount = useMemo(() => {
+    const appVideos = filteredContent.filter((c) => {
+      const isGraphics = c.format === 'Graphics Task' || 
+                         c.uniqueId?.startsWith('GP-') || 
+                         ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo'].includes(c.format);
+      if (isGraphics) return false;
+      if (!user.isAdmin && !user.isTL) {
+        if (c.editorId && c.editorId !== user.id) return false;
+      }
+      return c.approvalStatus === 'Approved';
+    }).length;
+
+    const appAds = filteredAdCreatives.filter((ac) => {
+      if (!user.isAdmin && !user.isTL) {
+        const matchesId = ac.editorId && ac.editorId === user.id;
+        const matchesName = ac.editorName && user.name && ac.editorName.toLowerCase().includes(user.name.toLowerCase());
+        if (ac.editorId || ac.editorName) {
+          if (!matchesId && !matchesName) return false;
+        }
+      }
+      return ac.approval === 'Approved';
+    }).length;
+
+    const appTasks = filteredTasks.filter((t) => {
+      if (!user.isAdmin && !user.isTL) {
+        if (t.assignedToId && t.assignedToId !== user.id) return false;
+      }
+      return t.status === 'Completed' || t.status === 'Approved';
+    }).reduce((sum, t) => {
+      const count = parseInt(t.graphicsCount || '0', 10);
+      return sum + (isNaN(count) || count <= 0 ? 1 : count);
+    }, 0);
+
+    return appVideos + appAds + appTasks;
+  }, [filteredContent, filteredAdCreatives, filteredTasks, user]);
+
   // Top KPIs
   const totalContent = filteredContent.length;
   const inProgress = filteredContent.filter((c) => ['In Progress', 'Editing', 'Review'].includes(c.status) || (!c.sendTo && c.approvalStatus === 'Pending')).length;
@@ -219,6 +328,12 @@ export default function SocialMediaPerformanceDashboard({
 
   const scheduled = filteredContent.filter((c) => c.uploadingStatus === 'Scheduled').length;
   const isPostingTeam = user.department === 'Posting Team' || filterTeam === 'Posting Team';
+  const isGraphicsUser = user.department === 'Graphics Team' || user.department === 'Graphics' || user.department === 'Thumbnail Team' || (Boolean(user.department) && user.department.toLowerCase().includes('graphic'));
+  const isEditingUser = user.department === 'Editing Team' || user.department === 'Editing' || (Boolean(user.department) && user.department.toLowerCase().includes('edit'));
+
+  const showGraphicsCards = filterTeam === 'Graphics Team' || (filterTeam === 'All' && isGraphicsUser && !user.isAdmin) || (user.isAdmin && filterTeam === 'All' && adminTab === 'graphics');
+  const showEditingCards = !isPostingTeam && !showGraphicsCards;
+
   const published = isPostingTeam 
     ? filteredContent.filter(isItemFullyUploaded).length
     : filteredContent.filter((c) => c.uploadingStatus === 'Published').length;
@@ -542,86 +657,246 @@ export default function SocialMediaPerformanceDashboard({
         </div>
       ) : (
         <div>
-          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
-            {/* 1. Graphics Count */}
-            <div className="kpi-card" style={{ borderColor: 'rgba(168, 85, 247, 0.3)', background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div className="kpi-label" style={{ color: '#c084fc', fontWeight: 600 }}>Graphics Count</div>
-                  <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#f3e8ff', marginTop: '6px' }}>
-                    {totalGraphicsCount}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Graphics Working Sheet (Sum)
-                  </div>
-                </div>
-                <div className="kpi-icon" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7' }}>
-                  <Palette size={20} />
-                </div>
-              </div>
+          {user.isAdmin && filterTeam === 'All' && (
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>Dashboard View:</span>
+              <button
+                onClick={() => setAdminTab('editing')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: adminTab === 'editing' ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
+                  background: adminTab === 'editing' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255,255,255,0.03)',
+                  color: adminTab === 'editing' ? '#60a5fa' : 'var(--text-muted)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                🎬 Editing Team View
+              </button>
+              <button
+                onClick={() => setAdminTab('graphics')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: adminTab === 'graphics' ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
+                  background: adminTab === 'graphics' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255,255,255,0.03)',
+                  color: adminTab === 'graphics' ? '#c084fc' : 'var(--text-muted)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                🎨 Graphics Team View
+              </button>
             </div>
+          )}
 
-            {/* 2. Thumbnail Count */}
-            <div className="kpi-card" style={{ borderColor: 'rgba(236, 72, 153, 0.3)', background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div className="kpi-label" style={{ color: '#f472b6', fontWeight: 600 }}>Thumbnail Count</div>
-                  <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#fce7f3', marginTop: '6px' }}>
-                    {totalThumbnailCount}
+          {showEditingCards ? (
+            /* --- EDITING TEAM SCORE CARDS --- */
+            <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+              {/* 1. Long Video */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(59, 130, 246, 0.3)', background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#60a5fa', fontWeight: 600 }}>Long Video</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#eff6ff', marginTop: '6px' }}>
+                      {longVideoCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Editor Working Sheet (Long)
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Thumbnail Sheet (Sum)
+                  <div className="kpi-icon" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
+                    <Film size={20} />
                   </div>
-                </div>
-                <div className="kpi-icon" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899' }}>
-                  <Layout size={20} />
                 </div>
               </div>
-            </div>
 
-            {/* 3. Ad Creative Count */}
-            <div className="kpi-card" style={{ borderColor: 'rgba(245, 158, 11, 0.3)', background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div className="kpi-label" style={{ color: '#fbbf24', fontWeight: 600 }}>Ad Creative Count</div>
-                  <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#fef3c7', marginTop: '6px' }}>
-                    {totalAdCreativeCount}
+              {/* 2. Short Video */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(168, 85, 247, 0.3)', background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#c084fc', fontWeight: 600 }}>Short Video</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#f3e8ff', marginTop: '6px' }}>
+                      {shortVideoCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Short / Reel Format
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Ad Creative Sheet (Total)
+                  <div className="kpi-icon" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7' }}>
+                    <Zap size={20} />
                   </div>
-                </div>
-                <div className="kpi-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
-                  <Film size={20} />
                 </div>
               </div>
-            </div>
 
-            {/* 4. Other Task Count */}
-            <div className="kpi-card" style={{ borderColor: 'rgba(6, 182, 212, 0.3)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div className="kpi-label" style={{ color: '#22d3ee', fontWeight: 600 }}>Other Task Count</div>
-                  <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#cffafe', marginTop: '6px' }}>
-                    {totalOtherTaskCount}
+              {/* 3. Ad Creative */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(245, 158, 11, 0.3)', background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#fbbf24', fontWeight: 600 }}>Ad Creative</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#fef3c7', marginTop: '6px' }}>
+                      {editorAdCreativeCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Ad Creative Sheet (Sum)
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Task Sheet (Sum of Graphics)
+                  <div className="kpi-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
+                    <Sparkles size={20} />
                   </div>
                 </div>
-                <div className="kpi-icon" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4' }}>
-                  <ClipboardList size={20} />
+              </div>
+
+              {/* 4. Other Task */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(6, 182, 212, 0.3)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#22d3ee', fontWeight: 600 }}>Other Task</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#cffafe', marginTop: '6px' }}>
+                      {editorOtherTaskCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Task Sheet (Sum)
+                    </div>
+                  </div>
+                  <div className="kpi-icon" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4' }}>
+                    <ClipboardList size={20} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Total Work */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(16, 185, 129, 0.35)', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#34d399', fontWeight: 600 }}>Total Work</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#ecfdf5', marginTop: '6px' }}>
+                      {editorTotalWorkCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Videos + Ads + Tasks
+                    </div>
+                  </div>
+                  <div className="kpi-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
+                    <Layers size={20} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 6. Approved */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(20, 184, 166, 0.35)', background: 'linear-gradient(135deg, rgba(20, 184, 166, 0.1) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#2dd4bf', fontWeight: 600 }}>Approved</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#f0fdfa', marginTop: '6px' }}>
+                      {editorApprovedCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Approved Work (Count)
+                    </div>
+                  </div>
+                  <div className="kpi-icon" style={{ background: 'rgba(20, 184, 166, 0.15)', color: '#14b8a6' }}>
+                    <CheckCircle2 size={20} />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          ) : (
+            /* --- GRAPHICS TEAM SCORE CARDS --- */
+            <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+              {/* 1. Graphics Count */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(168, 85, 247, 0.3)', background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#c084fc', fontWeight: 600 }}>Graphics Count</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#f3e8ff', marginTop: '6px' }}>
+                      {totalGraphicsCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Graphics Working Sheet (Sum)
+                    </div>
+                  </div>
+                  <div className="kpi-icon" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7' }}>
+                    <Palette size={20} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Thumbnail Count */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(236, 72, 153, 0.3)', background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#f472b6', fontWeight: 600 }}>Thumbnail Count</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#fce7f3', marginTop: '6px' }}>
+                      {totalThumbnailCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Thumbnail Sheet (Sum)
+                    </div>
+                  </div>
+                  <div className="kpi-icon" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899' }}>
+                    <Layout size={20} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Ad Creative Count */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(245, 158, 11, 0.3)', background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#fbbf24', fontWeight: 600 }}>Ad Creative Count</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#fef3c7', marginTop: '6px' }}>
+                      {totalAdCreativeCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Ad Creative Sheet (Total)
+                    </div>
+                  </div>
+                  <div className="kpi-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
+                    <Film size={20} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Other Task Count */}
+              <div className="kpi-card" style={{ borderColor: 'rgba(6, 182, 212, 0.3)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="kpi-label" style={{ color: '#22d3ee', fontWeight: 600 }}>Other Task Count</div>
+                    <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#cffafe', marginTop: '6px' }}>
+                      {totalOtherTaskCount}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Task Sheet (Sum of Graphics)
+                    </div>
+                  </div>
+                  <div className="kpi-icon" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4' }}>
+                    <ClipboardList size={20} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Secondary Pipeline Status Bar */}
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '24px' }}>
-            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Total Content:</span>
-              <strong style={{ color: 'var(--text-primary)' }}>{totalContent}</strong>
-            </div>
+            {showEditingCards ? (
+              <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Total Videos:</span>
+                <strong style={{ color: 'var(--text-primary)' }}>{totalVideoCount}</strong>
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({longVideoCount} Long, {shortVideoCount} Short)</span>
+              </div>
+            ) : (
+              <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Total Content:</span>
+                <strong style={{ color: 'var(--text-primary)' }}>{totalContent}</strong>
+              </div>
+            )}
             <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
               <span style={{ color: '#fbbf24' }}>In Progress:</span>
               <strong style={{ color: 'var(--text-primary)' }}>{inProgress}</strong>
