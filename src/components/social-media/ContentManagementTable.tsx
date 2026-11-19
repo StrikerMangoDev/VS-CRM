@@ -127,8 +127,8 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
         scheduleVideo: record.scheduleVideo || false,
         uploadingTime: record.uploadingTime || '',
         storyStatus: record.storyStatus || 'Pending',
-        editorId: record.editorId || '',
-        graphicDesignerId: record.graphicDesignerId || '',
+        editorId: (record.graphicDesignerId || record.editorId) || '',
+        graphicDesignerId: (record.graphicDesignerId || record.editorId) || '',
         doneDate: record.doneDate ? new Date(new Date(record.doneDate).getTime() - new Date(record.doneDate).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '',
         approvalDate: record.approvalDate ? new Date(new Date(record.approvalDate).getTime() - new Date(record.approvalDate).getTimezoneOffset() * 60000).toISOString().split('T')[0] : '',
         postOnDate: record.postOnDate ? new Date(new Date(record.postOnDate).getTime() - new Date(record.postOnDate).getTimezoneOffset() * 60000).toISOString().split('T')[0] : '',
@@ -139,10 +139,15 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
       setEditingRecord(null);
       const now = new Date();
       const localNow = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      const isGraphicsTab = dataType === 'Graphics' || isGraphicsSheet || currentUserDepartment === 'Graphics Team';
+      const defaultAssignee = currentUserDepartment === 'Graphics Team' 
+        ? (currentUserId || '') 
+        : (!isGraphicsTab && currentUserDepartment === 'Editing Team' ? (currentUserId || '') : '');
       setFormData({ 
         ...initialFormState, 
-        editorId: (isGraphicsSheet || currentUserDepartment === 'Graphics Team') ? '' : (currentUserId || ''), 
-        graphicDesignerId: (isGraphicsSheet || currentUserDepartment === 'Graphics Team') ? (currentUserId || '') : '', 
+        format: isGraphicsTab ? 'Graphics Task' : 'Long Video',
+        editorId: defaultAssignee, 
+        graphicDesignerId: defaultAssignee, 
         doneDate: localNow, 
         thumbnailDoneDate: isThumbnailSheet ? localNow : '' 
       });
@@ -178,8 +183,16 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
       }
     }
     
+    const isGraphicsItem = dataType === 'Graphics' || isGraphicsSheet || ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo', 'Graphics Task'].includes(formData.format);
+    const assignedId = formData.graphicDesignerId || formData.editorId || '';
+
     if (editingRecord) {
-      const res = await updateContentRecord(editingRecord.id, formData);
+      const payload = { ...formData };
+      if (isGraphicsItem) {
+        payload.graphicDesignerId = assignedId;
+        payload.editorId = assignedId;
+      }
+      const res = await updateContentRecord(editingRecord.id, payload);
       if (res.success) {
         await fetchData();
         handleCloseModal();
@@ -188,8 +201,12 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
       }
     } else {
       const payload = { ...formData };
-      if (isGraphicsSheet) {
-        payload.format = 'Graphics Task';
+      if (isGraphicsItem) {
+        if (!payload.format || payload.format === 'Long Video') {
+          payload.format = 'Graphics Task';
+        }
+        payload.graphicDesignerId = assignedId;
+        payload.editorId = assignedId;
       }
       const res = await createContentRecord(formData.channel || channel, payload);
       if (res.success) {
@@ -297,10 +314,14 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
   // Filtered Data
   const filteredData = useMemo(() => {
     return baseData.filter((item) => {
+      const currentItemEditorName = (dataType === 'Graphics'
+        ? (item.graphicDesigner?.name || item.editor?.name)
+        : (item.editor?.name || item.graphicDesigner?.name)) || '';
+
       const matchesSearch = 
         item.uniqueId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.topic?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.editor?.name?.toLowerCase().includes(searchTerm.toLowerCase());
+        currentItemEditorName.toLowerCase().includes(searchTerm.toLowerCase());
         
       const matchesStatus = filterStatus === 'All' || item.status === filterStatus;
       
@@ -312,7 +333,7 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
         matchesDataType = dataType === 'Video' ? isVideo : isGraphics;
       }
       
-      const matchesEditor = filterEditor === 'All' || item.editor?.name === filterEditor;
+      const matchesEditor = filterEditor === 'All' || currentItemEditorName === filterEditor;
       const matchesFormat = filterFormat === 'All' || item.format === filterFormat;
       const matchesAppStatus = filterAppStatus === 'All' || item.approvalStatus === filterAppStatus;
       
@@ -331,7 +352,13 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
     });
   }, [baseData, dataType, isWorkingSheet, isThumbnailSheet, isGraphicsSheet]);
 
-  const uniqueEditors = useMemo(() => Array.from(new Set(filteredBaseDataForOptions.map(d => d.editor?.name).filter(Boolean))), [filteredBaseDataForOptions]);
+  const uniqueEditors = useMemo(() => Array.from(new Set(
+    filteredBaseDataForOptions.map(d => 
+      dataType === 'Graphics'
+        ? (d.graphicDesigner?.name || d.editor?.name)
+        : (d.editor?.name || d.graphicDesigner?.name)
+    ).filter(Boolean)
+  )), [filteredBaseDataForOptions, dataType]);
   const uniqueFormats = useMemo(() => Array.from(new Set(filteredBaseDataForOptions.map(d => d.format).filter(Boolean))), [filteredBaseDataForOptions]);
   const uniqueAppStatuses = useMemo(() => {
     const statuses = new Set(filteredBaseDataForOptions.map(d => d.approvalStatus).filter(Boolean));
@@ -662,12 +689,20 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                     <td style={{ ...tdStyle, ...stickyLeft, fontWeight: 700, color: 'var(--primary)' }}>{row.uniqueId}</td>
                   {(!isThumbnailSheet && !isGraphicsSheet) && (
                     <td style={{ ...tdStyle, ...stickyLeft2 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700 }}>
-                          {row.editor?.name?.[0] || '?'}
-                        </div>
-                        <span>{row.editor?.name || 'Unassigned'}</span>
-                      </div>
+                      {(() => {
+                        const assignedEditor = dataType === 'Graphics'
+                          ? (row.graphicDesigner || row.editor)
+                          : (row.editor || row.graphicDesigner);
+                        const assignedEditorName = assignedEditor?.name;
+                        return (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700 }}>
+                              {assignedEditorName ? assignedEditorName[0] : '?'}
+                            </div>
+                            <span>{assignedEditorName || 'Unassigned'}</span>
+                          </div>
+                        );
+                      })()}
                     </td>
                   )}
                   <td style={tdStyle}>{row.platform}</td>
@@ -1025,15 +1060,22 @@ export default function ContentManagementTable({ channel, isWorkingSheet = false
                 {/* 1. Editor Name */}
                 {(!isGraphicsSheet && !isPostingSheet) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Editor Name</label>
+                    <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                      {dataType === 'Graphics' || ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo', 'Graphics Task'].includes(formData.format) ? 'Graphic Editor' : 'Editor Name'}
+                    </label>
                     <select 
-                      value={formData.editorId} 
-                      onChange={(e) => setFormData({...formData, editorId: e.target.value})} 
+                      value={formData.graphicDesignerId || formData.editorId || ''} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData(prev => ({ ...prev, editorId: val, graphicDesignerId: val }));
+                      }} 
                       disabled={isWorkingSheet || isThumbnailSheet || isManagerRestricted}
                       style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--card-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--text-primary)', opacity: (isWorkingSheet || isThumbnailSheet || isManagerRestricted) ? 0.7 : 1, cursor: (isWorkingSheet || isThumbnailSheet || isManagerRestricted) ? 'not-allowed' : 'pointer' }}
                     >
-                      <option value="">Select Editor...</option>
-                      {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.mainDepartment})</option>)}
+                      <option value="">
+                        {dataType === 'Graphics' || ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo', 'Graphics Task'].includes(formData.format) ? 'Select Graphic Editor...' : 'Select Editor...'}
+                      </option>
+                      {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.department || u.mainDepartment})</option>)}
                     </select>
                   </div>
                 )}

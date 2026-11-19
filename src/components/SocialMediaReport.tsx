@@ -364,13 +364,14 @@ export default function SocialMediaReport({ socialMediaData, taskData, adCreativ
           }
         }
       } else {
-        if (c.editor && map[c.editor.id]) {
-          map[c.editor.id].totalContent += 1;
-          if (map[c.editor.id].channelCounts[normChannel] !== undefined) {
-            map[c.editor.id].channelCounts[normChannel] += 1;
+        const execPerson = c.uniqueId?.startsWith('GP-') ? (c.graphicDesigner || c.editor) : (c.editor || c.graphicDesigner);
+        if (execPerson && map[execPerson.id]) {
+          map[execPerson.id].totalContent += 1;
+          if (map[execPerson.id].channelCounts[normChannel] !== undefined) {
+            map[execPerson.id].channelCounts[normChannel] += 1;
           }
-          if (c.approvalStatus === 'Pending') map[c.editor.id].pendingApproval += 1;
-          if (c.approvalStatus === 'Approved') map[c.editor.id].approved += 1;
+          if (c.approvalStatus === 'Pending') map[execPerson.id].pendingApproval += 1;
+          if (c.approvalStatus === 'Approved') map[execPerson.id].approved += 1;
         }
       }
     });

@@ -77,12 +77,12 @@ export default function SocialMediaPerformanceDashboard({ initialContent = [], i
 
       // Team filter
       if (filterTeam !== 'All') {
-        const isGraphics = c.uniqueId?.startsWith('GP-') || c.editor?.department === 'Graphics Team';
+        const isGraphics = c.uniqueId?.startsWith('GP-') || c.editor?.department === 'Graphics Team' || c.graphicDesigner?.department === 'Graphics Team';
         if (filterTeam === 'Graphics Team' && !isGraphics) return false;
         if (filterTeam === 'Editing Team' && isGraphics) return false;
       }
       
-      const exec = c.editor;
+      const exec = c.uniqueId?.startsWith('GP-') ? (c.graphicDesigner || c.editor) : (c.editor || c.graphicDesigner);
       
       // Admin/TL Specific Filters
       if (user.isAdmin || user.isTL) {
@@ -99,8 +99,9 @@ export default function SocialMediaPerformanceDashboard({ initialContent = [], i
   const editors = useMemo(() => {
     const uniqueEditors = new Map();
     initialContent.forEach((c) => {
-      if (c.editor) {
-        uniqueEditors.set(c.editor.id, c.editor.name);
+      const exec = c.editor || c.graphicDesigner;
+      if (exec) {
+        uniqueEditors.set(exec.id, exec.name);
       }
     });
     return Array.from(uniqueEditors.entries()).map(([id, name]) => ({ id, name }));

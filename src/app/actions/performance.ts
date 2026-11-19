@@ -187,9 +187,9 @@ export async function getSocialMediaPerformanceData() {
         ]
       }
     } else {
-      whereClause = {
-        editorId: user.id
-      }
+      whereClause = user.department === 'Graphics Team'
+        ? { OR: [{ graphicDesignerId: user.id }, { editorId: user.id }] }
+        : { editorId: user.id }
     }
   }
 
@@ -197,6 +197,14 @@ export async function getSocialMediaPerformanceData() {
     where: whereClause,
     include: {
       editor: {
+        select: {
+          id: true,
+          name: true,
+          department: true,
+          subTeam: true,
+        }
+      },
+      graphicDesigner: {
         select: {
           id: true,
           name: true,

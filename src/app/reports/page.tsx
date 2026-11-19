@@ -126,6 +126,9 @@ export default async function SalesReportPage() {
       editor: {
         select: { id: true, name: true, department: true }
       },
+      graphicDesigner: {
+        select: { id: true, name: true, department: true }
+      },
       postedBy: {
         select: { id: true, name: true, department: true }
       }
