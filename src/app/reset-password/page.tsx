@@ -3,6 +3,7 @@
 import { useState,Suspense } from 'react'
 import { useRouter,useSearchParams } from 'next/navigation'
 import { resetPassword } from '../actions/auth'
+import { Eye, EyeOff } from 'lucide-react'
 
 function ResetPasswordForm() {
   const router = useRouter()
@@ -11,6 +12,8 @@ function ResetPasswordForm() {
   const [otp, setOtp] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [status, setStatus] = useState<{type: 'error' | 'success', msg: string} | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -113,48 +116,90 @@ function ResetPasswordForm() {
 
           <div>
             <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '8px' }}>New Password</label>
-            <input 
-              name="newPassword"
-              type="password" 
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              minLength={6}
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                borderRadius: '8px',
-                border: '1px solid var(--card-border)',
-                background: 'var(--card-bg)',
-                color: 'var(--text-primary)',
-                outline: 'none',
-                fontFamily: 'inherit'
-              }}
-            />
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <input 
+                name="newPassword"
+                type={showNewPassword ? 'text' : 'password'} 
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                minLength={6}
+                style={{
+                  width: '100%',
+                  padding: '12px 42px 12px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--card-border)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  fontFamily: 'inherit'
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword(prev => !prev)}
+                style={{
+                  position: 'absolute',
+                  right: '12px',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '4px'
+                }}
+                title={showNewPassword ? 'Hide password' : 'Show password'}
+              >
+                {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
 
           <div>
             <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '8px' }}>Confirm New Password</label>
-            <input 
-              name="confirmPassword"
-              type="password" 
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              minLength={6}
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                borderRadius: '8px',
-                border: '1px solid var(--card-border)',
-                background: 'var(--card-bg)',
-                color: 'var(--text-primary)',
-                outline: 'none',
-                fontFamily: 'inherit'
-              }}
-            />
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <input 
+                name="confirmPassword"
+                type={showConfirmPassword ? 'text' : 'password'} 
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                minLength={6}
+                style={{
+                  width: '100%',
+                  padding: '12px 42px 12px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--card-border)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  fontFamily: 'inherit'
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(prev => !prev)}
+                style={{
+                  position: 'absolute',
+                  right: '12px',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '4px'
+                }}
+                title={showConfirmPassword ? 'Hide password' : 'Show password'}
+              >
+                {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
 
           <button type="submit" disabled={loading} className="btn btn-primary" style={{ padding: '12px', marginTop: '8px', opacity: loading ? 0.7 : 1 }}>

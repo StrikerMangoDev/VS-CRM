@@ -3,17 +3,22 @@
 import { useState } from 'react';
 import { loginAction } from '../actions/auth';
 import MathBackground from '@/components/MathBackground';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = async (formData: FormData) => {
     setError(null)
+    setIsLoading(true)
     const result = await loginAction(formData)
     if (result?.error) {
       setError(result.error)
+      setIsLoading(false)
     } else if (result?.success) {
       window.location.href = '/performance'
     }
@@ -84,29 +89,55 @@ export default function LoginPage() {
               <label style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 500 }}>Password</label>
               <a href="/forgot-password" style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}>Forgot Password?</a>
             </div>
-            <input 
-              name="password"
-              type="password" 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                borderRadius: '10px',
-                border: '1px solid var(--card-border)',
-                background: 'var(--card-bg)',
-                color: 'var(--text-primary)',
-                outline: 'none',
-                fontFamily: 'inherit',
-                fontSize: '0.95rem'
-              }}
-            />
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <input 
+                name="password"
+                type={showPassword ? 'text' : 'password'} 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 44px 12px 16px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--card-border)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  fontSize: '0.95rem'
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(prev => !prev)}
+                style={{
+                  position: 'absolute',
+                  right: '12px',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '4px',
+                  borderRadius: '6px',
+                  transition: 'color 0.2s'
+                }}
+                onMouseOver={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
+                onMouseOut={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
 
           <button 
             type="submit" 
+            disabled={isLoading}
             className="btn btn-primary" 
             style={{ 
               padding: '12px', 
@@ -118,10 +149,12 @@ export default function LoginPage() {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '8px',
-              width: '100%'
+              width: '100%',
+              opacity: isLoading ? 0.7 : 1,
+              cursor: isLoading ? 'not-allowed' : 'pointer'
             }}
           >
-            Sign In
+            {isLoading ? 'Signing In...' : 'Sign In'}
           </button>
         </form>
       </div>
