@@ -9,8 +9,10 @@ import 'react-datepicker/dist/react-datepicker.css'
 import AddColumnModal from '@/components/AddColumnModal'
 import { deleteCustomColumnAction } from '@/app/actions/column'
 import { removeLeadFromSheetAction } from '@/app/actions/lead'
-import { Search, X, Trash2 } from 'lucide-react'
+import { Search, X, Trash2, Pencil } from 'lucide-react'
 import { useConfirm } from '@/providers/ConfirmProvider'
+import EditSimpleLeadModal from '@/components/EditSimpleLeadModal'
+import { useRouter } from 'next/navigation'
 
 type LeadData = {
   id: string;
@@ -29,6 +31,7 @@ type LeadData = {
   partPaymentId?: string | null;
   fullPaymentId?: string | null;
   partPaymentAmount?: number | null;
+  fullPaymentAmount?: number | null;
   webinarId?: string | null;
   customData?: string;
   callStatus?: string | null;
@@ -37,7 +40,24 @@ type LeadData = {
   nextFollowUpDate?: string | Date | null;
 }
 
-export default function SimpleLeadTable({ initialPage, isAdmin = false, customColumns = [], sheetName = 'SIMPLE' }: { initialPage: LeadPage, isAdmin?: boolean, customColumns?: import('@prisma/client').CustomColumn[], sheetName?: string }) {
+export default function SimpleLeadTable({ 
+  initialPage, 
+  isAdmin = false, 
+  userRole = '', 
+  customColumns = [], 
+  sheetName = 'SIMPLE' 
+}: { 
+  initialPage: LeadPage, 
+  isAdmin?: boolean, 
+  userRole?: string, 
+  customColumns?: import('@prisma/client').CustomColumn[], 
+  sheetName?: string 
+}) {
+  const router = useRouter()
+  const [editingLead, setEditingLead] = useState<LeadData | null>(null)
+  const [overrides, setOverrides] = useState<Record<string, Partial<LeadData>>>({})
+  const canEditLead = isAdmin || userRole === 'TL' || userRole === 'ADMIN' || userRole === 'MANAGER'
+
   const [searchQuery, setSearchQuery] = useState('')
   const [filterWebinar, setFilterWebinar] = useState('')
   const [filterState, setFilterState] = useState('')
@@ -79,7 +99,7 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
     setSelectedLeads(newSelected)
   }
 
-  const displayedLeads=leads
+  const displayedLeads = leads.map(l => overrides[l.id] ? { ...l, ...overrides[l.id] } : l)
 
   const exportToCSV = async () => {
     const exportLeads = await allMatchingLeads(query)
@@ -304,7 +324,7 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
                   </div>
                 </th>
               ))}
-              {isAdmin && <th>Actions</th>}
+              {(isAdmin || canEditLead) && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -336,23 +356,39 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
                   } catch {}
                   return <td key={col.id} style={{ color: 'var(--text-primary)' }}>{val}</td>
                 })}
-                {isAdmin && (
+                {(isAdmin || canEditLead) && (
                   <td>
-                    <button 
-                      onClick={() => handleDeleteLead(lead.id)}
-                      style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: 'var(--danger)', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 600, transition: 'all 0.2s' }}
-                      onMouseOver={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)'}
-                      onMouseOut={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {canEditLead && (
+                        <button 
+                          onClick={() => setEditingLead(lead)}
+                          style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', color: '#60a5fa', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 600, transition: 'all 0.2s' }}
+                          onMouseOver={e => e.currentTarget.style.background = 'rgba(59, 130, 246, 0.2)'}
+                          onMouseOut={e => e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)'}
+                          title="Edit Lead"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button 
+                          onClick={() => handleDeleteLead(lead.id)}
+                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: 'var(--danger)', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 600, transition: 'all 0.2s' }}
+                          onMouseOver={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)'}
+                          onMouseOut={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'}
+                          title="Delete Lead"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 )}
               </tr>
             ))}
             {leads.length === 0 && (
               <tr>
-                <td colSpan={7 + customColumns.length + (isAdmin ? 1 : 0) + (sheetName === 'PART_PAYMENT' ? 1 : 0)} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
+                <td colSpan={7 + customColumns.length + ((isAdmin || canEditLead) ? 1 : 0) + (sheetName === 'PART_PAYMENT' ? 1 : 0)} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
                   No leads found.
                 </td>
               </tr>
@@ -361,6 +397,28 @@ export default function SimpleLeadTable({ initialPage, isAdmin = false, customCo
           </tbody>
         </table>
       </div>
+
+      {editingLead && (
+        <EditSimpleLeadModal
+          lead={editingLead}
+          isOpen={true}
+          onClose={() => setEditingLead(null)}
+          onSave={(updatedLead) => {
+            setOverrides(prev => ({
+              ...prev,
+              [updatedLead.id]: {
+                ...(prev[updatedLead.id] || {}),
+                ...updatedLead
+              }
+            }))
+            router.refresh()
+          }}
+          sheetName={sheetName}
+          states={pageData.options.states as string[]}
+          webinars={pageData.options.webinars as string[]}
+          customColumns={customColumns}
+        />
+      )}
     </>
   )
 }

@@ -47,7 +47,7 @@ export default async function FullPaymentSheet() {
         </div>
       </div>
 
-      <SimpleLeadTable initialPage={initialPage} isAdmin={isAdmin} customColumns={customColumns} sheetName="FULL_PAYMENT" />
+      <SimpleLeadTable initialPage={initialPage} isAdmin={isAdmin} userRole={user.role} customColumns={customColumns} sheetName="FULL_PAYMENT" />
     </>
   )
 }

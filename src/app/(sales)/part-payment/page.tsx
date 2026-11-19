@@ -47,7 +47,7 @@ export default async function PartPaymentSheet() {
         </div>
       </div>
 
-      <SimpleLeadTable initialPage={initialPage} isAdmin={isAdmin} customColumns={customColumns} sheetName="PART_PAYMENT" />
+      <SimpleLeadTable initialPage={initialPage} isAdmin={isAdmin} userRole={user.role} customColumns={customColumns} sheetName="PART_PAYMENT" />
     </>
   )
 }

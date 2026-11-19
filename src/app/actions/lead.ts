@@ -231,6 +231,141 @@ export async function updateLeadAction(formData: FormData) {
   });
 }
 
+export async function updateSimpleLeadAction(data: {
+  id: string
+  name: string
+  mobileNumber: string
+  email?: string | null
+  state?: string | null
+  amount: number
+  paymentDate?: string | Date | null
+  webinarId?: string | null
+  customData?: string
+}) {
+  return withLeadTransaction(async () => {
+    const actor = await requireLeadAccess(data.id, false);
+    const existingLead = await prisma.lead.findUnique({
+      where: { id: data.id }
+    });
+    if (!existingLead) throw new Error('Lead not found');
+
+    const isSalesTL = (actor.role === 'TL' || actor.role === 'MANAGER') && (actor.department === 'SALES' || actor.mainDepartment === 'Sales Department');
+    const isAdmin = actor.role === 'ADMIN';
+    if (!isAdmin && !isSalesTL) {
+      throw new Error('Only Admin and Sales TL can edit lead details');
+    }
+
+    if (!data.name || !data.name.trim()) throw new Error('Lead name is required');
+    if (!data.mobileNumber || !data.mobileNumber.trim()) throw new Error('Mobile number is required');
+    if (data.amount === undefined || data.amount === null || isNaN(Number(data.amount)) || Number(data.amount) < 0) {
+      throw new Error('Valid amount is required');
+    }
+
+    const numAmount = Number(data.amount);
+    const cleanName = data.name.trim();
+    const cleanMobile = data.mobileNumber.trim();
+    const cleanEmail = data.email ? data.email.trim() : null;
+    const cleanState = data.state ? data.state.trim() : null;
+    const cleanWebinar = data.webinarId ? data.webinarId.trim() : null;
+    const parsedPaymentDate = data.paymentDate ? new Date(data.paymentDate) : null;
+
+    const dataToUpdate: import('@prisma/client').Prisma.LeadUpdateInput = {
+      name: cleanName,
+      mobileNumber: cleanMobile,
+      email: cleanEmail,
+      state: cleanState,
+      totalPayment: numAmount,
+      ...(data.customData !== undefined ? { customData: data.customData } : {})
+    };
+
+    if (existingLead.paymentStatus === 'PART_PAYMENT') {
+      dataToUpdate.partPaymentAmount = numAmount;
+    } else if (existingLead.paymentStatus === 'FULL_PAYMENT') {
+      dataToUpdate.fullPaymentAmount = numAmount;
+    }
+
+    if (data.paymentDate !== undefined) {
+      dataToUpdate.paymentDate = parsedPaymentDate;
+    }
+
+    if (data.webinarId !== undefined) {
+      if (cleanWebinar) {
+        const webinarRecord = await prisma.webinarMaster.findUnique({ where: { id: cleanWebinar } });
+        if (webinarRecord) {
+          dataToUpdate.webinar = { connect: { id: cleanWebinar } };
+          dataToUpdate.webinarName = null;
+        } else {
+          dataToUpdate.webinar = { disconnect: true };
+          dataToUpdate.webinarName = cleanWebinar;
+        }
+      } else {
+        dataToUpdate.webinar = { disconnect: true };
+        dataToUpdate.webinarName = null;
+      }
+    }
+
+    // Log audit changes
+    const changes: { field: string; oldVal: string; newVal: string }[] = [];
+    if (existingLead.name !== cleanName) {
+      changes.push({ field: 'Name', oldVal: existingLead.name || '-', newVal: cleanName });
+    }
+    if (existingLead.mobileNumber !== cleanMobile) {
+      changes.push({ field: 'Mobile Number', oldVal: existingLead.mobileNumber || '-', newVal: cleanMobile });
+    }
+    if ((existingLead.email || '') !== (cleanEmail || '')) {
+      changes.push({ field: 'Email', oldVal: existingLead.email || '-', newVal: cleanEmail || '-' });
+    }
+    if ((existingLead.state || '') !== (cleanState || '')) {
+      changes.push({ field: 'State', oldVal: existingLead.state || '-', newVal: cleanState || '-' });
+    }
+    if (existingLead.totalPayment !== numAmount) {
+      changes.push({ field: 'Payment Amount', oldVal: String(existingLead.totalPayment), newVal: String(numAmount) });
+    }
+    if (data.paymentDate !== undefined) {
+      const oldDate = existingLead.paymentDate ? new Date(existingLead.paymentDate).toISOString().split('T')[0] : '';
+      const newDate = parsedPaymentDate ? parsedPaymentDate.toISOString().split('T')[0] : '';
+      if (oldDate !== newDate) {
+        changes.push({ field: 'Payment Date', oldVal: oldDate || '-', newVal: newDate || '-' });
+      }
+    }
+
+    if (changes.length > 0) {
+      await logAuditChanges(data.id, changes);
+    }
+
+    const updated = await prisma.lead.update({
+      where: { id: data.id },
+      data: dataToUpdate,
+      select: {
+        id: true,
+        uniqueId: true,
+        name: true,
+        mobileNumber: true,
+        email: true,
+        state: true,
+        totalPayment: true,
+        partPaymentAmount: true,
+        fullPaymentAmount: true,
+        partPaymentId: true,
+        fullPaymentId: true,
+        webinarId: true,
+        webinarName: true,
+        paymentDate: true,
+        paymentStatus: true,
+        customData: true,
+      }
+    });
+
+    revalidatePath('/part-payment');
+    revalidatePath('/full-payment');
+    revalidatePath('/sales');
+    revalidatePath('/recovery');
+    revalidatePath('/');
+
+    return { success: true, lead: updated };
+  });
+}
+
 export async function deleteLeadAction(leadId: string) {
   return withLeadTransaction(async () => {
 
