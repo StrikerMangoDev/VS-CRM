@@ -120,13 +120,14 @@ function AdCreativeSheetTable({
   const [dataType, setDataType] = useState<'Video' | 'Graphics'>(defaultDataType);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFor, setSelectedFor] = useState<string>('ALL');
+  const [selectedEditor, setSelectedEditor] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [selectedApproval, setSelectedApproval] = useState<string>('ALL');
   const [selectedUseStatus, setSelectedUseStatus] = useState<string>('ALL');
 
   // Pagination
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
-  const [currentPage,setCurrentPage]=usePageNumber(JSON.stringify([searchQuery,selectedFor,selectedStatus,selectedApproval,selectedUseStatus,dataType,itemsPerPage]))
+  const [currentPage,setCurrentPage]=usePageNumber(JSON.stringify([searchQuery,selectedFor,selectedEditor,selectedStatus,selectedApproval,selectedUseStatus,dataType,itemsPerPage]))
 
   const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set());
 
@@ -285,6 +286,7 @@ function AdCreativeSheetTable({
   const hasActiveFilters = Boolean(
     searchQuery.trim() || 
     selectedFor !== 'ALL' || 
+    selectedEditor !== 'ALL' ||
     selectedStatus !== 'ALL' || 
     selectedApproval !== 'ALL' || 
     selectedUseStatus !== 'ALL'
@@ -293,11 +295,35 @@ function AdCreativeSheetTable({
   const handleResetFilters = () => {
     setSearchQuery('');
     setSelectedFor('ALL');
+    setSelectedEditor('ALL');
     setSelectedStatus('ALL');
     setSelectedApproval('ALL');
     setSelectedUseStatus('ALL');
     showToast('🔄 Filters have been reset');
   };
+
+  // Available Editors for the active data type
+  const availableEditors = useMemo(() => {
+    const names = new Set<string>();
+    records
+      .filter(r => (r.mediaType || 'Video') === dataType)
+      .forEach(r => {
+        const n = r.editorName || r.editor?.name;
+        if (n && n.trim()) names.add(n.trim());
+      });
+    editors.forEach(ed => {
+      if (!ed.name || !ed.name.trim()) return;
+      const dept = (ed.department || '').toLowerCase();
+      if (dataType === 'Video' && (dept.includes('edit') || dept === 'all' || !dept)) {
+        names.add(ed.name.trim());
+      } else if (dataType === 'Graphics' && (dept.includes('graphic') || dept === 'all' || !dept)) {
+        names.add(ed.name.trim());
+      } else if (!dept.includes('edit') && !dept.includes('graphic')) {
+        names.add(ed.name.trim());
+      }
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [records, dataType, editors]);
 
   // Filtered Records
   const filteredRecords = useMemo(() => {
@@ -319,6 +345,12 @@ function AdCreativeSheetTable({
       // For filter
       if (selectedFor !== 'ALL' && r.forTarget !== selectedFor) return false;
 
+      // Editor filter
+      if (selectedEditor !== 'ALL') {
+        const itemEditor = (r.editorName || r.editor?.name || '').trim().toLowerCase();
+        if (itemEditor !== selectedEditor.trim().toLowerCase()) return false;
+      }
+
       // Status filter
       if (selectedStatus !== 'ALL' && r.status !== selectedStatus) return false;
 
@@ -336,7 +368,7 @@ function AdCreativeSheetTable({
 
       return true;
     });
-  }, [records, dataType, searchQuery, selectedFor, selectedStatus, selectedApproval, selectedUseStatus, isManagerOrAdmin, currentUser]);
+  }, [records, dataType, searchQuery, selectedFor, selectedEditor, selectedStatus, selectedApproval, selectedUseStatus, isManagerOrAdmin, currentUser]);
 
 
 
@@ -722,7 +754,10 @@ function AdCreativeSheetTable({
               }}>
                 <button 
                   type="button"
-                  onClick={() => setDataType('Video')}
+                  onClick={() => {
+                    setDataType('Video');
+                    setSelectedEditor('ALL');
+                  }}
                   style={{ 
                     padding: '7px 18px', 
                     borderRadius: '8px',
@@ -739,7 +774,10 @@ function AdCreativeSheetTable({
                 </button>
                 <button 
                   type="button"
-                  onClick={() => setDataType('Graphics')}
+                  onClick={() => {
+                    setDataType('Graphics');
+                    setSelectedEditor('ALL');
+                  }}
                   style={{ 
                     padding: '7px 18px', 
                     borderRadius: '8px',
@@ -887,6 +925,28 @@ function AdCreativeSheetTable({
               <option value="ALL">All &quot;For&quot; Targets</option>
               {FOR_OPTIONS.map(opt => (
                 <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+
+            {/* Filter: Editor */}
+            <select
+              value={selectedEditor}
+              onChange={(e) => setSelectedEditor(e.target.value)}
+              style={{
+                background: selectedEditor !== 'ALL' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                border: selectedEditor !== 'ALL' ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
+                padding: '7px 12px',
+                borderRadius: '8px',
+                color: selectedEditor !== 'ALL' ? '#93c5fd' : 'var(--text-primary)',
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                outline: 'none',
+                fontWeight: 600
+              }}
+            >
+              <option value="ALL">{dataType === 'Video' ? 'All Editors' : 'All Designers / Editors'}</option>
+              {availableEditors.map(ed => (
+                <option key={ed} value={ed}>{ed}</option>
               ))}
             </select>
 
