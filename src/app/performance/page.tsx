@@ -22,6 +22,7 @@ export default async function PerformancePage() {
         issuesData={salesData.issues}
         socialMediaData={socialMediaData.contentRecords}
         taskData={socialMediaData.taskRecords}
+        adCreativeData={socialMediaData.adCreativeRecords}
         user={salesData.user} 
       />
     </div>

@@ -1,5 +1,5 @@
 'use client'
-import type { LeadMetrics,DashboardUser,ContentView,TaskView,IssueView } from '@/lib/view-types'
+import type { LeadMetrics,DashboardUser,ContentView,TaskView,IssueView,AdCreativeView } from '@/lib/view-types'
 
 import { useState } from 'react'
 import PerformanceDashboard from '@/components/PerformanceDashboard'
@@ -10,11 +10,19 @@ export default function PerformancePageWrapper({
   issuesData,
   socialMediaData, 
   taskData,
+  adCreativeData = [],
   user 
-}: {salesData:LeadMetrics[];issuesData:IssueView[];socialMediaData:ContentView[];taskData:TaskView[];user:DashboardUser}) {
+}: {
+  salesData: LeadMetrics[];
+  issuesData: IssueView[];
+  socialMediaData: ContentView[];
+  taskData: TaskView[];
+  adCreativeData?: AdCreativeView[];
+  user: DashboardUser;
+}) {
   const [activeTab, setActiveTab] = useState<'SALES' | 'SOCIAL_MEDIA'>('SALES')
 
-  const isSocialMediaUser = user.mainDepartment === 'Social Media' || user.department === 'Graphics Team' || user.department === 'Editing Team' || user.department === 'Posting Team';
+  const isSocialMediaUser = user.mainDepartment === 'Social Media' || user.department === 'Graphics Team' || user.department === 'Editing Team' || user.department === 'Posting Team' || (user.department && user.department.toLowerCase().includes('graphic'));
   
 
   if (user.role === 'ADMIN') {
@@ -58,7 +66,7 @@ export default function PerformancePageWrapper({
         {activeTab === 'SALES' ? (
           <PerformanceDashboard initialLeads={salesData} issues={issuesData} user={user} />
         ) : (
-          <SocialMediaPerformanceDashboard initialContent={socialMediaData} initialTasks={taskData} user={user} />
+          <SocialMediaPerformanceDashboard initialContent={socialMediaData} initialTasks={taskData} initialAdCreatives={adCreativeData} user={user} />
         )}
       </div>
     )
@@ -68,7 +76,7 @@ export default function PerformancePageWrapper({
   if (isSocialMediaUser) {
     return (
       <div style={{ padding: '24px' }}>
-        <SocialMediaPerformanceDashboard initialContent={socialMediaData} initialTasks={taskData} user={user} />
+        <SocialMediaPerformanceDashboard initialContent={socialMediaData} initialTasks={taskData} initialAdCreatives={adCreativeData} user={user} />
       </div>
     )
   }

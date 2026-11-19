@@ -144,18 +144,29 @@ export async function getPerformanceData() {
 }
 
 export async function getSocialMediaPerformanceData() {
-  const user=await requireUser()
+  const user = await requireUser()
   const isAdmin = user.role === 'ADMIN'
   const isTL = user.role === 'TL' || user.role === 'MANAGER'
+  const isManager = user.role === 'MANAGER'
+
+  const userDept = (user.department || '').trim();
+  const isGraphicsUser = userDept === 'Graphics Team' || 
+    userDept === 'Graphics' || 
+    userDept === 'Thumbnail Team' || 
+    userDept.toLowerCase().includes('graphic');
+  const isEditingUser = userDept === 'Editing Team' || 
+    userDept === 'Editing' || 
+    userDept.toLowerCase().includes('edit');
+  const isPostingUser = userDept === 'Posting Team' || 
+    userDept === 'Posting' || 
+    userDept.toLowerCase().includes('post');
 
   let whereClause: Prisma.ContentRecordWhereInput = {}
 
-  if (isAdmin) {
-    // Admin sees all content records
+  if (isAdmin || isManager) {
     whereClause = {}
   } else if (isTL) {
-    // TL sees all content records for their department
-    if (user.department === 'Posting Team') {
+    if (isPostingUser) {
       whereClause = {
         OR: [
           {
@@ -166,16 +177,29 @@ export async function getSocialMediaPerformanceData() {
           { uploadingStatus: { in: ['Scheduled', 'Published', 'Uploaded'] } }
         ]
       }
-    } else {
+    } else if (isGraphicsUser) {
       whereClause = {
-        editor: {
-          department: user.department
-        }
+        OR: [
+          { format: 'Graphics Task' },
+          { uniqueId: { startsWith: 'GP-' } },
+          { graphicDesignerId: { not: null } },
+          { sendTo: 'Send for thumbnail' },
+          { graphicDesigner: { department: { contains: 'Graphic', mode: 'insensitive' } } }
+        ]
       }
+    } else if (isEditingUser) {
+      whereClause = {
+        OR: [
+          { editor: { department: { contains: 'Edit', mode: 'insensitive' } } },
+          { format: { in: ['Long Video', 'Short / Reel', 'Short', 'Reel'] } }
+        ]
+      }
+    } else {
+      whereClause = {}
     }
   } else {
     // Executive
-    if (user.department === 'Posting Team') {
+    if (isPostingUser) {
       whereClause = {
         OR: [
           {
@@ -186,10 +210,31 @@ export async function getSocialMediaPerformanceData() {
           { uploadingStatus: { in: ['Scheduled', 'Published', 'Uploaded'] } }
         ]
       }
+    } else if (isGraphicsUser) {
+      whereClause = {
+        OR: [
+          { graphicDesignerId: user.id },
+          { editorId: user.id },
+          { format: 'Graphics Task' },
+          { uniqueId: { startsWith: 'GP-' } },
+          { sendTo: 'Send for thumbnail' },
+          { thumbnailCount: { not: null } }
+        ]
+      }
+    } else if (isEditingUser) {
+      whereClause = {
+        OR: [
+          { editorId: user.id },
+          { graphicDesignerId: user.id }
+        ]
+      }
     } else {
-      whereClause = user.department === 'Graphics Team'
-        ? { OR: [{ graphicDesignerId: user.id }, { editorId: user.id }] }
-        : { editorId: user.id }
+      whereClause = {
+        OR: [
+          { editorId: user.id },
+          { graphicDesignerId: user.id }
+        ]
+      }
     }
   }
 
@@ -229,19 +274,32 @@ export async function getSocialMediaPerformanceData() {
   })
 
   let taskWhereClause: Prisma.TaskRecordWhereInput = {}
-  if (user.department === 'Posting Team') {
-    // Posting Team does not use task sheet
+  if (isPostingUser) {
     taskWhereClause = { id: '__none__' }
-  } else if (isAdmin) {
+  } else if (isAdmin || isManager) {
     taskWhereClause = {}
   } else if (isTL) {
-    taskWhereClause = {
-      assignedDepartment: user.department
-    }
+    taskWhereClause = isGraphicsUser
+      ? { assignedDepartment: { in: ['Graphics Team', 'Graphics'] } }
+      : { assignedDepartment: user.department }
   } else {
-    taskWhereClause = {
-      assignedToId: user.id
-    }
+    taskWhereClause = isGraphicsUser
+      ? {
+          OR: [
+            { assignedToId: user.id },
+            { assignedDepartment: 'Graphics Team' },
+            { assignedDepartment: 'Graphics' }
+          ]
+        }
+      : isEditingUser
+        ? {
+            OR: [
+              { assignedToId: user.id },
+              { assignedDepartment: 'Editing Team' },
+              { assignedDepartment: 'Editing' }
+            ]
+          }
+        : { assignedToId: user.id }
   }
 
   const taskRecords = await prisma.taskRecord.findMany({
@@ -249,5 +307,59 @@ export async function getSocialMediaPerformanceData() {
     orderBy: { id: 'desc' }
   })
 
-  return { contentRecords, taskRecords, user: { ...user, isAdmin, isTL } }
+  // Ad Creative Records
+  let adCreativeWhereClause: Prisma.AdCreativeRecordWhereInput = {}
+  if (isAdmin || isManager) {
+    adCreativeWhereClause = {}
+  } else if (isTL) {
+    if (isGraphicsUser) {
+      adCreativeWhereClause = { mediaType: 'Graphics' }
+    } else if (isEditingUser) {
+      adCreativeWhereClause = { mediaType: 'Video' }
+    } else {
+      adCreativeWhereClause = {}
+    }
+  } else {
+    // Executive
+    if (isGraphicsUser) {
+      adCreativeWhereClause = {
+        OR: [
+          { editorId: user.id },
+          { editorName: { contains: user.name, mode: 'insensitive' } },
+          { mediaType: 'Graphics' }
+        ]
+      }
+    } else if (isEditingUser) {
+      adCreativeWhereClause = {
+        OR: [
+          { editorId: user.id },
+          { editorName: { contains: user.name, mode: 'insensitive' } },
+          { mediaType: 'Video' }
+        ]
+      }
+    } else {
+      adCreativeWhereClause = {
+        OR: [
+          { editorId: user.id },
+          { editorName: { contains: user.name, mode: 'insensitive' } }
+        ]
+      }
+    }
+  }
+
+  const adCreativeRecords = await prisma.adCreativeRecord.findMany({
+    where: adCreativeWhereClause,
+    include: {
+      editor: {
+        select: {
+          id: true,
+          name: true,
+          department: true
+        }
+      }
+    },
+    orderBy: { createdAt: 'desc' }
+  })
+
+  return { contentRecords, taskRecords, adCreativeRecords, user: { ...user, isAdmin, isTL } }
 }

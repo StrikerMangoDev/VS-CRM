@@ -1,5 +1,5 @@
 'use client'
-import type { ContentView,TaskView,DashboardUser,DateButtonProps } from '@/lib/view-types'
+import type { ContentView,TaskView,DashboardUser,DateButtonProps,AdCreativeView } from '@/lib/view-types'
 
 import { useState,useMemo,forwardRef } from 'react'
 import {
@@ -8,7 +8,8 @@ PieChart,Pie,Cell,BarChart,Bar,Legend
 } from 'recharts'
 import {
 Calendar,ChevronDown,Video,CheckCircle2,Clock,
-ExternalLink,Trophy,AlertCircle,Send,RotateCcw,RefreshCw
+ExternalLink,Trophy,AlertCircle,Send,RotateCcw,RefreshCw,
+Palette,Layout,Film,ClipboardList
 } from 'lucide-react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -32,7 +33,17 @@ const CustomDateInput = forwardRef<HTMLButtonElement,DateButtonProps>(({ value, 
 ));
 CustomDateInput.displayName = 'CustomDateInput';
 
-export default function SocialMediaPerformanceDashboard({ initialContent = [], initialTasks = [], user }: {initialContent?:ContentView[];initialTasks?:TaskView[];user:DashboardUser}) {
+export default function SocialMediaPerformanceDashboard({ 
+  initialContent = [], 
+  initialTasks = [], 
+  initialAdCreatives = [],
+  user 
+}: {
+  initialContent?: ContentView[];
+  initialTasks?: TaskView[];
+  initialAdCreatives?: AdCreativeView[];
+  user: DashboardUser;
+}) {
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null)
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null)
   const [filterChannel, setFilterChannel] = useState('All')
@@ -43,19 +54,55 @@ export default function SocialMediaPerformanceDashboard({ initialContent = [], i
   // Filter tasks dynamically
   const filteredTasks = useMemo(() => {
     return initialTasks.filter((t) => {
-      // Date filter based on assigningDate (it's a string like YYYY-MM-DD or DateTime)
-      if (t.assigningDate) {
-        const tDate = new Date(t.assigningDate);
+      // Date filter based on assigningDate or createdAt
+      const dateStr = t.assigningDate || (t.createdAt ? new Date(t.createdAt).toISOString().split('T')[0] : null);
+      if (dateStr) {
+        const tDate = new Date(dateStr);
         if (filterStartDate && tDate < filterStartDate) return false;
         if (filterEndDate && tDate > filterEndDate) return false;
       }
       
       // Team filter
       if (filterTeam !== 'All' && t.assignedDepartment !== filterTeam) return false;
+
+      // Executive isolation
+      if (!user.isAdmin && !user.isTL) {
+        if (t.assignedToId && t.assignedToId !== user.id) return false;
+      }
+
+      // Admin/TL Specific Filters
+      if (user.isAdmin || user.isTL) {
+        if (filterEditor !== 'All' && t.assignedToId !== filterEditor) return false;
+      }
       
       return true;
     });
-  }, [initialTasks, filterStartDate, filterEndDate, filterTeam])
+  }, [initialTasks, filterStartDate, filterEndDate, filterTeam, filterEditor, user])
+
+  // Filter Ad Creatives dynamically
+  const filteredAdCreatives = useMemo(() => {
+    return initialAdCreatives.filter((ac) => {
+      if (ac.createdAt) {
+        const acDate = new Date(ac.createdAt);
+        if (filterStartDate && acDate < filterStartDate) return false;
+        if (filterEndDate && acDate > filterEndDate) return false;
+      }
+
+      // Executive isolation
+      if (!user.isAdmin && !user.isTL) {
+        if (ac.editorId && ac.editorId !== user.id) return false;
+      }
+
+      // Admin/TL Specific Filters
+      if (user.isAdmin || user.isTL) {
+        if (filterEditor !== 'All' && ac.editorId !== filterEditor && ac.editorName !== filterEditor && ac.editor?.name !== filterEditor) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [initialAdCreatives, filterStartDate, filterEndDate, filterEditor, user]);
 
   // Filter content dynamically on client side
   const filteredContent = useMemo(() => {
@@ -99,13 +146,62 @@ export default function SocialMediaPerformanceDashboard({ initialContent = [], i
   const editors = useMemo(() => {
     const uniqueEditors = new Map();
     initialContent.forEach((c) => {
-      const exec = c.editor || c.graphicDesigner;
-      if (exec) {
-        uniqueEditors.set(exec.id, exec.name);
-      }
+      if (c.editor) uniqueEditors.set(c.editor.id, c.editor.name);
+      if (c.graphicDesigner) uniqueEditors.set(c.graphicDesigner.id, c.graphicDesigner.name);
+    });
+    initialAdCreatives.forEach((ac) => {
+      if (ac.editor) uniqueEditors.set(ac.editor.id, ac.editor.name);
+      else if (ac.editorName && ac.editorId) uniqueEditors.set(ac.editorId, ac.editorName);
+    });
+    initialTasks.forEach((t) => {
+      if (t.assignedTo) uniqueEditors.set(t.assignedTo.id, t.assignedTo.name);
     });
     return Array.from(uniqueEditors.entries()).map(([id, name]) => ({ id, name }));
-  }, [initialContent]);
+  }, [initialContent, initialAdCreatives, initialTasks]);
+
+  // 1. Graphics Count: sum of graphicsCount in graphics work sheet
+  const totalGraphicsCount = useMemo(() => {
+    return filteredContent.reduce((sum, c) => {
+      const isGraphics = c.format === 'Graphics Task' || 
+                         c.uniqueId?.startsWith('GP-') || 
+                         ['Post', 'Carousel', 'Carousels', 'Story', 'Community Post', 'Banners', 'Logo'].includes(c.format);
+      if (!isGraphics) return sum;
+
+      // Executive isolation
+      if (!user.isAdmin && !user.isTL) {
+        if (c.graphicDesignerId && c.graphicDesignerId !== user.id) return sum;
+      }
+
+      const count = parseInt(c.graphicsCount || '0', 10);
+      return sum + (isNaN(count) ? 0 : count);
+    }, 0);
+  }, [filteredContent, user]);
+
+  // 2. Thumbnail Count: sum of thumbnailCount in thumbnail sheet / records
+  const totalThumbnailCount = useMemo(() => {
+    return filteredContent.reduce((sum, c) => {
+      // Executive isolation
+      if (!user.isAdmin && !user.isTL) {
+        if (c.graphicDesignerId && c.graphicDesignerId !== user.id) return sum;
+      }
+
+      const count = parseInt(c.thumbnailCount || '0', 10);
+      return sum + (isNaN(count) ? 0 : count);
+    }, 0);
+  }, [filteredContent, user]);
+
+  // 3. Ad Creative Count: total ad creative records
+  const totalAdCreativeCount = useMemo(() => {
+    return filteredAdCreatives.length;
+  }, [filteredAdCreatives]);
+
+  // 4. Other Task Count: sum of graphicsCount in task sheet
+  const totalOtherTaskCount = useMemo(() => {
+    return filteredTasks.reduce((sum, t) => {
+      const count = parseInt(t.graphicsCount || '0', 10);
+      return sum + (isNaN(count) ? 0 : count);
+    }, 0);
+  }, [filteredTasks]);
 
   // Top KPIs
   const totalContent = filteredContent.length;
@@ -445,68 +541,102 @@ export default function SocialMediaPerformanceDashboard({ initialContent = [], i
           </div>
         </div>
       ) : (
-        <div className="kpi-grid">
-          <div className="kpi-card" style={{ borderColor: 'rgba(59, 130, 246, 0.2)' }}>
-            <div className="kpi-label">Total Content</div>
-            <div className="kpi-value">{totalContent}</div>
-            <div className="kpi-icon" style={{ background: 'rgba(59, 130, 246, 0.1)', color: COLORS.primary }}>
-              <Video size={18} />
+        <div>
+          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+            {/* 1. Graphics Count */}
+            <div className="kpi-card" style={{ borderColor: 'rgba(168, 85, 247, 0.3)', background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div className="kpi-label" style={{ color: '#c084fc', fontWeight: 600 }}>Graphics Count</div>
+                  <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#f3e8ff', marginTop: '6px' }}>
+                    {totalGraphicsCount}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Graphics Working Sheet (Sum)
+                  </div>
+                </div>
+                <div className="kpi-icon" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7' }}>
+                  <Palette size={20} />
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Thumbnail Count */}
+            <div className="kpi-card" style={{ borderColor: 'rgba(236, 72, 153, 0.3)', background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div className="kpi-label" style={{ color: '#f472b6', fontWeight: 600 }}>Thumbnail Count</div>
+                  <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#fce7f3', marginTop: '6px' }}>
+                    {totalThumbnailCount}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Thumbnail Sheet (Sum)
+                  </div>
+                </div>
+                <div className="kpi-icon" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899' }}>
+                  <Layout size={20} />
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Ad Creative Count */}
+            <div className="kpi-card" style={{ borderColor: 'rgba(245, 158, 11, 0.3)', background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div className="kpi-label" style={{ color: '#fbbf24', fontWeight: 600 }}>Ad Creative Count</div>
+                  <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#fef3c7', marginTop: '6px' }}>
+                    {totalAdCreativeCount}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Ad Creative Sheet (Total)
+                  </div>
+                </div>
+                <div className="kpi-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
+                  <Film size={20} />
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Other Task Count */}
+            <div className="kpi-card" style={{ borderColor: 'rgba(6, 182, 212, 0.3)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(19, 27, 46, 0.6) 100%)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div className="kpi-label" style={{ color: '#22d3ee', fontWeight: 600 }}>Other Task Count</div>
+                  <div className="kpi-value" style={{ fontSize: '2rem', fontWeight: 700, color: '#cffafe', marginTop: '6px' }}>
+                    {totalOtherTaskCount}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Task Sheet (Sum of Graphics)
+                  </div>
+                </div>
+                <div className="kpi-icon" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4' }}>
+                  <ClipboardList size={20} />
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="kpi-card" style={{ borderColor: 'rgba(251, 191, 36, 0.2)' }}>
-            <div className="kpi-label">In Progress</div>
-            <div className="kpi-value">{inProgress}</div>
-            <div className="kpi-icon" style={{ background: 'rgba(251, 191, 36, 0.1)', color: COLORS.warning }}>
-              <Clock size={18} />
+          {/* Secondary Pipeline Status Bar */}
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '24px' }}>
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Total Content:</span>
+              <strong style={{ color: 'var(--text-primary)' }}>{totalContent}</strong>
             </div>
-          </div>
-
-          <div className="kpi-card" style={{ borderColor: 'rgba(249, 115, 22, 0.2)' }}>
-            <div className="kpi-label">Pending Approval</div>
-            <div className="kpi-value">{pendingApproval}</div>
-            <div className="kpi-icon" style={{ background: 'rgba(249, 115, 22, 0.1)', color: COLORS.orange }}>
-              <AlertCircle size={18} />
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
+              <span style={{ color: '#fbbf24' }}>In Progress:</span>
+              <strong style={{ color: 'var(--text-primary)' }}>{inProgress}</strong>
             </div>
-          </div>
-
-          <div className="kpi-card" style={{ borderColor: 'rgba(239, 68, 68, 0.2)' }}>
-            <div className="kpi-label">Revision</div>
-            <div className="kpi-value">{revision}</div>
-            <div className="kpi-icon" style={{ background: 'rgba(239, 68, 68, 0.1)', color: COLORS.danger }}>
-              <RefreshCw size={18} />
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
+              <span style={{ color: '#f97316' }}>Pending Approval:</span>
+              <strong style={{ color: 'var(--text-primary)' }}>{pendingApproval}</strong>
             </div>
-          </div>
-
-          <div className="kpi-card" style={{ borderColor: 'rgba(16, 185, 129, 0.2)' }}>
-            <div className="kpi-label">Approved</div>
-            <div className="kpi-value">{approved}</div>
-            <div className="kpi-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: COLORS.success }}>
-              <CheckCircle2 size={18} />
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
+              <span style={{ color: '#ef4444' }}>Revision:</span>
+              <strong style={{ color: 'var(--text-primary)' }}>{revision}</strong>
             </div>
-          </div>
-
-          <div className="kpi-card" style={{ borderColor: 'rgba(239, 68, 68, 0.2)' }}>
-            <div className="kpi-label">Posting Due</div>
-            <div className="kpi-value">{postingDue}</div>
-            <div className="kpi-icon" style={{ background: 'rgba(239, 68, 68, 0.1)', color: COLORS.danger }}>
-              <AlertCircle size={18} />
-            </div>
-          </div>
-
-          <div className="kpi-card" style={{ borderColor: 'rgba(168, 85, 247, 0.2)' }}>
-            <div className="kpi-label">Scheduled</div>
-            <div className="kpi-value">{scheduled}</div>
-            <div className="kpi-icon" style={{ background: 'rgba(168, 85, 247, 0.1)', color: COLORS.secondary }}>
-              <Calendar size={18} />
-            </div>
-          </div>
-
-          <div className="kpi-card" style={{ borderColor: 'rgba(236, 72, 153, 0.2)' }}>
-            <div className="kpi-label">Published</div>
-            <div className="kpi-value">{published}</div>
-            <div className="kpi-icon" style={{ background: 'rgba(236, 72, 153, 0.1)', color: COLORS.pink }}>
-              <ExternalLink size={18} />
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
+              <span style={{ color: '#10b981' }}>Approved:</span>
+              <strong style={{ color: 'var(--text-primary)' }}>{approved}</strong>
             </div>
           </div>
         </div>
