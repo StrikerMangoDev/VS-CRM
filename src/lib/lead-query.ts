@@ -74,7 +74,18 @@ export function leadFilters(q: LeadQuery) {
   if (q.search) conditions.push(q.sheet==='PORTAL' ? contains('customData',q.search) : Prisma.sql`(${Prisma.join(searchFields.map(name=>contains(name,q.search!)), ' OR ')} ${master ? Prisma.sql`OR strpos(lower(coalesce(${webinar},'')),lower(${q.search}))>0` : Prisma.empty})`)
   if(q.sheet==='PORTAL'&&q.portalColumn&&q.portalValue)conditions.push(Prisma.sql`strpos(lower(coalesce((CASE WHEN l."customData" IS JSON OBJECT THEN l."customData"::json ELSE '{}'::json END)->>${q.portalColumn},'')),lower(${q.portalValue}))>0`)
   if (q.webinar) conditions.push(['PART_PAYMENT','FULL_PAYMENT'].includes(q.sheet) ? Prisma.sql`(l."webinarId"=${q.webinar} OR l."webinarName"=${q.webinar})` : Prisma.sql`${webinar}=${q.webinar}`)
-  for (const [key,name] of [['payment','paymentStatus'],['state','state'],['leadStatus','leadStatus']] as const) if(q[key] && q[key]!=='all') conditions.push(Prisma.sql`${field(name)}=${q[key]}`)
+  for (const [key,name] of [['payment','paymentStatus'],['state','state']] as const) if(q[key] && q[key]!=='all') conditions.push(Prisma.sql`${field(name)}=${q[key]}`)
+  if (q.leadStatus && q.leadStatus !== 'all' && q.leadStatus !== '') {
+    if (q.leadStatus === 'IN_PROGRESS' || q.leadStatus.toLowerCase() === 'in progress') {
+      conditions.push(Prisma.sql`(coalesce(nullif(l."leadStatus", ''), 'IN_PROGRESS') = 'IN_PROGRESS' AND coalesce(l."isTransferred", false) = false AND coalesce(l."leadStatus", '') NOT LIKE 'CLOSED%')`)
+    } else if (q.leadStatus === 'CLOSED' || q.leadStatus.toLowerCase() === 'closed') {
+      conditions.push(Prisma.sql`(l."leadStatus" LIKE 'CLOSED%' OR coalesce(l."isTransferred", false) = true)`)
+    } else if (q.leadStatus === 'CLOSED_FULL_PAYMENT' || q.leadStatus.toLowerCase().includes('full payment')) {
+      conditions.push(Prisma.sql`(l."leadStatus" = 'CLOSED_FULL_PAYMENT' OR lower(coalesce(l."leadStatus", '')) LIKE '%full payment%')`)
+    } else {
+      conditions.push(Prisma.sql`l."leadStatus" = ${q.leadStatus}`)
+    }
+  }
   if (q.whatsapp) conditions.push(Prisma.sql`l."whatsappJoined"=${q.whatsapp==='JOINED'}`)
   if (q.call && q.call!=='all') {
     const upper=Prisma.sql`upper(coalesce(nullif(l."callStatus",''), 'UNTOUCHED'))`

@@ -200,6 +200,7 @@ function MasterLeadTable({
   const [filterWebinar, setFilterWebinar] = useState('')
   const [filterPaymentStatus, setFilterPaymentStatus] = useState('')
   const [filterCallStatus, setFilterCallStatus] = useState('')
+  const [filterLeadStatus, setFilterLeadStatus] = useState('')
   const [filterLogStatus, setFilterLogStatus] = useState('')
   const [filterState, setFilterState] = useState('')
   const [filterWhatsapp, setFilterWhatsapp] = useState('')
@@ -238,7 +239,7 @@ function MasterLeadTable({
   },[transferFromUser,transferCallStatus,transferWebinar,transferKey])
 
   const [filterNow] = useState(() => new Date())
-  const queryFilters: LeadQuery = { sheet: sheetName === 'EXTRA_DIALER' ? 'EXTRA_DIALER' : 'MASTER', search: searchQuery, webinar: filterWebinar, payment: filterPaymentStatus, call: filterCallStatus, log: filterLogStatus, state: filterState, whatsapp: filterWhatsapp, team: filterTeam, executive: filterExecutive, ...dateBounds(filterDateRange,filterStartDate,filterEndDate,filterNow), sort: sortColumn, direction: sortDirection }
+  const queryFilters: LeadQuery = { sheet: sheetName === 'EXTRA_DIALER' ? 'EXTRA_DIALER' : 'MASTER', search: searchQuery, webinar: filterWebinar, payment: filterPaymentStatus, call: filterCallStatus, leadStatus: filterLeadStatus, log: filterLogStatus, state: filterState, whatsapp: filterWhatsapp, team: filterTeam, executive: filterExecutive, ...dateBounds(filterDateRange,filterStartDate,filterEndDate,filterNow), sort: sortColumn, direction: sortDirection }
   const [requestedPage, setRequestedPage] = usePageNumber(JSON.stringify({...queryFilters,size:pageSize}))
   const query = {...queryFilters,page:requestedPage,size:pageSize}
   const { rows: leads, setRows, ...pageData } = useLeadPage(initialPage,query)
@@ -420,30 +421,56 @@ function MasterLeadTable({
 
   const exportToCSV = async () => {
     const exportLeads = await allMatchingLeads(queryFilters)
-    const headers = ['Lead ID', 'Name', 'Email', 'Mobile', 'Webinar ID', 'State', 'Call Status', 'Remark 1', 'Remark 2', 'Next Follow Up', 'Part Payment', 'Full Payment', 'Discount', 'Sales Amount', 'Recovery Amount', 'Total Paid', 'WhatsApp', 'LEAD OWNER', 'Lead Status'];
-    const rows = exportLeads.map(lead => [
-      lead.uniqueId,
-      lead.name,
-      lead.email || '-',
-      lead.mobileNumber,
-      lead.webinarId || lead.webinarName || '-',
-      lead.state || '-',
-      lead.callStatus || 'UNTOUCHED',
-      lead.remark1 || '-',
-      lead.remark2 || '-',
-      lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString('en-GB') : '-',
-      lead.partPaymentAmount.toString(),
-      lead.fullPaymentAmount.toString(),
-      (lead.discount || 0).toString(),
-      (lead.salesAmount || 0).toString(),
-      (lead.recoveryAmount || 0).toString(),
-      lead.totalPayment.toString(),
-      lead.whatsappJoined ? 'JOINED' : 'PENDING',
-      lead.assignments && lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').length > 0
-        ? lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').map((a) => `${a.user.name} (${a.user.department})`).join('; ')
-        : 'Unassigned',
-      lead.leadStatus === 'CLOSED_FULL_PAYMENT' ? 'Full Payment Done (Close)' : lead.leadStatus?.startsWith('CLOSED') ? 'Closed Lead' : 'In Progress'
-    ]);
+    const headers = [
+      'Lead ID', 'Name', 'Email', 'Mobile', 'Webinar ID', 'State', 
+      'Call Status', 'Remark 1', 'Remark 2', 'Next Follow Up', 
+      'Part Payment', 'Full Payment', 'Discount', 'Sales Amount', 'Recovery Amount', 'Total Paid', 
+      'WhatsApp', 'LEAD OWNER', 'Lead Status'
+    ];
+    customColumns.forEach(col => {
+      headers.push(col.name);
+    });
+
+    const rows = exportLeads.map(lead => {
+      const row = [
+        lead.uniqueId,
+        lead.name,
+        lead.email || '-',
+        lead.mobileNumber,
+        lead.webinarId || lead.webinarName || '-',
+        lead.state || '-',
+        lead.callStatus || 'UNTOUCHED',
+        lead.remark1 || '-',
+        lead.remark2 || '-',
+        lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString('en-GB') : '-',
+        lead.partPaymentAmount.toString(),
+        lead.fullPaymentAmount.toString(),
+        (lead.discount || 0).toString(),
+        (lead.salesAmount || 0).toString(),
+        (lead.recoveryAmount || 0).toString(),
+        lead.totalPayment.toString(),
+        lead.whatsappJoined ? 'JOINED' : 'PENDING',
+        lead.assignments && lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').length > 0
+          ? lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').map((a) => `${a.user.name} (${a.user.department})`).join('; ')
+          : 'Unassigned',
+        lead.isTransferred 
+          ? 'Transferred (Closed)' 
+          : lead.leadStatus === 'CLOSED_FULL_PAYMENT' 
+            ? 'Full Payment Done (Close)' 
+            : lead.leadStatus?.startsWith('CLOSED') 
+              ? 'Closed Lead' 
+              : (lead.leadStatus === 'IN_PROGRESS' || !lead.leadStatus ? 'In Progress' : lead.leadStatus)
+      ];
+      customColumns.forEach(col => {
+        let val = '-';
+        try {
+          const parsed = JSON.parse(lead.customData || '{}');
+          val = parsed[col.name] || parsed[col.id] || '-';
+        } catch {}
+        row.push(val);
+      });
+      return row;
+    });
 
     const csvContent = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -495,6 +522,7 @@ function MasterLeadTable({
                 setFilterWebinar('')
                 setFilterPaymentStatus('')
                 setFilterCallStatus('')
+                setFilterLeadStatus('')
                 setFilterLogStatus('')
                 setFilterState('')
                 setFilterWhatsapp('')
@@ -595,6 +623,19 @@ function MasterLeadTable({
             {extraCallStatuses.map(status => (
               <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>
             ))}
+          </select>
+
+          <select value={filterLeadStatus} onChange={e => setFilterLeadStatus(e.target.value)} style={filterInputStyle}>
+            <option value="">All Leads</option>
+            <option value="IN_PROGRESS">In Progress</option>
+            <option value="CLOSED">Closed</option>
+            <option value="CLOSED_FULL_PAYMENT">Full Payment Done (Close)</option>
+            {dropdowns?.['Lead Status'] && dropdowns['Lead Status']
+              .filter(s => !['IN_PROGRESS', 'CLOSED', 'CLOSED_FULL_PAYMENT', 'In Progress', 'Closed', 'Full Payment Done (Close)'].includes(s))
+              .map(status => (
+                <option key={status} value={status}>{status}</option>
+              ))
+            }
           </select>
           
           {sheetName === 'RECOVERY' && (
