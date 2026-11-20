@@ -172,13 +172,57 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
   const totalCalls = connectedCalls + notConnected;
   
   const overallClosed = filteredLeads.filter((l) => l.leadStatus?.startsWith('CLOSED') || l.fullPaymentAmount > 0).length;
-  const untouchedLeads = totalLeads - activeLeads - overallClosed;
+  const untouchedLeads = Math.max(0, totalLeads - activeLeads - overallClosed);
   const conversionRate = totalLeads ? ((convertedLeads / totalLeads) * 100).toFixed(2) : '0.00';
   
   const followUpsDue = initialLeads.filter((l) => {
     if (!l.nextFollowUpDate || new Date(l.nextFollowUpDate) > new Date() || l.leadStatus?.startsWith('CLOSED')) return false;
     return isLeadInDateRange(l, l.nextFollowUpDate);
   }).length;
+
+  const totalPartPayment = useMemo(() => {
+    return initialLeads.reduce((sum: number, l) => {
+      if (!isLeadInDateRange(l, l.paymentDate || l.createdAt)) return sum;
+      const amt = (l.partPaymentAmount !== null && l.partPaymentAmount !== undefined && l.partPaymentAmount > 0)
+        ? l.partPaymentAmount
+        : (l.paymentStatus === 'PART_PAYMENT' ? (l.totalPayment || 0) : 0);
+      return sum + amt;
+    }, 0);
+  }, [initialLeads, isLeadInDateRange]);
+
+  const recoveryConvertedLeads = useMemo(() => {
+    return initialLeads.filter((l) => {
+      if (!isLeadInDateRange(l, l.updateStatusDate || l.updatedAt)) return false;
+      const isCompletePayment = 
+        l.paymentStatus === 'FULL_PAYMENT' || 
+        l.leadStatus === 'CLOSED_FULL_PAYMENT' || 
+        (l.fullPaymentAmount !== null && l.fullPaymentAmount !== undefined && l.fullPaymentAmount > 0) ||
+        (l.totalPayment !== null && l.totalPayment !== undefined && l.totalPayment >= 15999);
+      const hasRecovered = 
+        (l.recoveryAmount !== null && l.recoveryAmount !== undefined && l.recoveryAmount > 0) ||
+        ((l.totalPayment || 0) > (l.partPaymentAmount || 0));
+      return isCompletePayment || hasRecovered;
+    }).length;
+  }, [initialLeads, isLeadInDateRange]);
+
+  const recoveryRate = totalLeads ? ((recoveryConvertedLeads / totalLeads) * 100).toFixed(2) : '0.00';
+
+  const todaysFollowUps = useMemo(() => {
+    const today = new Date();
+    const todayYear = today.getFullYear();
+    const todayMonth = today.getMonth();
+    const todayDate = today.getDate();
+
+    return initialLeads.filter((l) => {
+      if (!l.nextFollowUpDate || l.leadStatus?.startsWith('CLOSED')) return false;
+      const d = new Date(l.nextFollowUpDate);
+      const isToday = d.getFullYear() === todayYear && d.getMonth() === todayMonth && d.getDate() === todayDate;
+      if (!isToday) return false;
+      return isLeadInDateRange(l, l.nextFollowUpDate);
+    }).length;
+  }, [initialLeads, isLeadInDateRange]);
+
+  const isRecovery = user.department === 'RECOVERY' || (user.isAdmin && filterDepartment === 'RECOVERY');
   
   const assignedLeads = filteredLeads.filter((l) => {
     const relevantAssignments = l.assignments ? l.assignments.filter((a) => a.user?.department !== 'TECHNICAL') : [];
@@ -440,6 +484,19 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
             <MetricCard title="Resolved Issues" value={resolvedIssues} icon={CheckCircle2} color={COLORS.success} trend={0} />
           </div>
         </>
+      ) : isRecovery ? (
+        <div className="perf-metric-grid">
+          <MetricCard title="Total Leads" value={totalLeads} icon={UserRound} color={COLORS.primary} trend={12.5} trendLabel="from last 30 days" />
+          <MetricCard title="Part Payment" value={formatCurrency(totalPartPayment)} icon={IndianRupee} color={COLORS.warning} trend={0} />
+          <MetricCard title="Recovered Amount" value={formatCurrency(totalRecovery)} icon={ShieldCheck} color={COLORS.secondary} trend={10.5} />
+          <MetricCard title="Total Calls" value={totalCalls} icon={Phone} color={COLORS.primary} trend={0} />
+          <MetricCard title="Connected Calls" value={connectedCalls} icon={PhoneCall} color={COLORS.success} trend={25} />
+          <MetricCard title="Not Connected" value={notConnected} icon={PhoneMissed} color={COLORS.danger} trend={0} />
+          <MetricCard title="Recovery Rate" value={`${recoveryRate}%`} icon={TrendingUp} color={COLORS.success} trend={0.18} />
+          <MetricCard title="Untouched Leads" value={untouchedLeads} icon={Inbox} color={COLORS.primary} trend={-5.8} />
+          <MetricCard title="Follow-ups Due" value={followUpsDue} icon={AlarmClock} color={COLORS.warning} trend={-33.3} />
+          <MetricCard title="Today's Follow Up" value={todaysFollowUps} icon={Calendar} color={COLORS.pink} trend={0} />
+        </div>
       ) : (
         <div className="perf-metric-grid">
             <MetricCard title="Total Leads" value={totalLeads} icon={UserRound} color={COLORS.primary} trend={12.5} trendLabel="from last 30 days" />
@@ -462,7 +519,7 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
               <MetricCard title="Total Revenue" value={formatCurrency(totalRevenue)} icon={IndianRupee} color={COLORS.secondary} trend={8.7} />
             )}
             
-            {(user.isAdmin || user.department === 'RECOVERY') && (
+            {user.isAdmin && (
               <>
                 <MetricCard title="Total Recovery" value={formatCurrency(totalRecovery)} icon={ShieldCheck} color={COLORS.secondary} trend={10.5} />
                 <MetricCard title="Pending Recovery" value={formatCurrency(pendingRecovery)} icon={AlertTriangle} color={COLORS.danger} trend={-2.1} />
@@ -538,27 +595,52 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
                   <div className="perf-tp-stat-dots"></div>
                   <div className="perf-tp-stat-value">{closedLeads}</div>
                 </div>
-                <div className="perf-tp-stat-row">
-                  <div className="perf-tp-stat-icon" style={{ background: '#ec489915', color: '#ec4899' }}><Target /></div>
-                  <div className="perf-tp-stat-label">Converted</div>
-                  <div className="perf-tp-stat-dots"></div>
-                  <div className="perf-tp-stat-value">{convertedLeads}</div>
-                </div>
-                {(user.department === 'SALES' || user.department === 'RECOVERY') && (
-                  <div className="perf-tp-stat-row">
-                    <div className="perf-tp-stat-icon blue"><DollarSign /></div>
-                    <div className="perf-tp-stat-label">Revenue</div>
-                    <div className="perf-tp-stat-dots"></div>
-                    <div className="perf-tp-stat-value">{formatCurrency(totalRevenue)}</div>
-                  </div>
-                )}
-                {(user.department === 'SALES' || user.department === 'RECOVERY') && (
-                  <div className="perf-tp-stat-row">
-                    <div className="perf-tp-stat-icon blue"><Target /></div>
-                    <div className="perf-tp-stat-label">Conversion</div>
-                    <div className="perf-tp-stat-dots"></div>
-                    <div className="perf-tp-stat-value">{conversionRate}%</div>
-                  </div>
+                {user.department === 'RECOVERY' ? (
+                  <>
+                    <div className="perf-tp-stat-row">
+                      <div className="perf-tp-stat-icon" style={{ background: '#ec489915', color: '#ec4899' }}><Target /></div>
+                      <div className="perf-tp-stat-label">Converted</div>
+                      <div className="perf-tp-stat-dots"></div>
+                      <div className="perf-tp-stat-value">{recoveryConvertedLeads}</div>
+                    </div>
+                    <div className="perf-tp-stat-row">
+                      <div className="perf-tp-stat-icon purple"><ShieldCheck /></div>
+                      <div className="perf-tp-stat-label">Recovered</div>
+                      <div className="perf-tp-stat-dots"></div>
+                      <div className="perf-tp-stat-value">{formatCurrency(totalRecovery)}</div>
+                    </div>
+                    <div className="perf-tp-stat-row">
+                      <div className="perf-tp-stat-icon blue"><TrendingUp /></div>
+                      <div className="perf-tp-stat-label">Recovery Rate</div>
+                      <div className="perf-tp-stat-dots"></div>
+                      <div className="perf-tp-stat-value">{recoveryRate}%</div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="perf-tp-stat-row">
+                      <div className="perf-tp-stat-icon" style={{ background: '#ec489915', color: '#ec4899' }}><Target /></div>
+                      <div className="perf-tp-stat-label">Converted</div>
+                      <div className="perf-tp-stat-dots"></div>
+                      <div className="perf-tp-stat-value">{convertedLeads}</div>
+                    </div>
+                    {user.department === 'SALES' && (
+                      <div className="perf-tp-stat-row">
+                        <div className="perf-tp-stat-icon blue"><DollarSign /></div>
+                        <div className="perf-tp-stat-label">Revenue</div>
+                        <div className="perf-tp-stat-dots"></div>
+                        <div className="perf-tp-stat-value">{formatCurrency(totalRevenue)}</div>
+                      </div>
+                    )}
+                    {user.department === 'SALES' && (
+                      <div className="perf-tp-stat-row">
+                        <div className="perf-tp-stat-icon blue"><Target /></div>
+                        <div className="perf-tp-stat-label">Conversion</div>
+                        <div className="perf-tp-stat-dots"></div>
+                        <div className="perf-tp-stat-value">{conversionRate}%</div>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
