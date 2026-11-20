@@ -274,14 +274,19 @@ export async function updateSimpleLeadAction(data: {
       mobileNumber: cleanMobile,
       email: cleanEmail,
       state: cleanState,
-      totalPayment: numAmount,
       ...(data.customData !== undefined ? { customData: data.customData } : {})
     };
 
     if (existingLead.paymentStatus === 'PART_PAYMENT') {
       dataToUpdate.partPaymentAmount = numAmount;
+      const oldPartPay = existingLead.partPaymentAmount || 0;
+      const salesAdded = Math.max(0, existingLead.totalPayment - oldPartPay);
+      dataToUpdate.totalPayment = numAmount + salesAdded;
     } else if (existingLead.paymentStatus === 'FULL_PAYMENT') {
       dataToUpdate.fullPaymentAmount = numAmount;
+      dataToUpdate.totalPayment = numAmount;
+    } else {
+      dataToUpdate.totalPayment = numAmount;
     }
 
     if (data.paymentDate !== undefined) {

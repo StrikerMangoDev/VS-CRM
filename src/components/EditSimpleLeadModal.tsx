@@ -54,10 +54,10 @@ export default function EditSimpleLeadModal({
 }: EditSimpleLeadModalProps) {
   const initialAmount = (
     sheetName === 'PART_PAYMENT' 
-      ? (lead.partPaymentAmount || lead.totalPayment || 0)
-      : sheetName === 'FULL_PAYMENT' 
-        ? (lead.totalPayment || 0)
-        : (lead.totalPayment || 0)
+      ? ((lead.partPaymentAmount !== null && lead.partPaymentAmount !== undefined && lead.partPaymentAmount > 0) 
+          ? lead.partPaymentAmount 
+          : (lead.totalPayment || 0))
+      : (lead.totalPayment || 0)
   );
 
   const formatDateForInput = (d: string | Date | null | undefined) => {

@@ -128,7 +128,11 @@ export default function SimpleLeadTable({
         lead.mobileNumber,
         lead.webinarId || lead.webinarName || '-',
         lead.state || '-',
-        (lead.partPaymentAmount || lead.totalPayment || 0).toString()
+        (sheetName === 'PART_PAYMENT' 
+          ? ((lead.partPaymentAmount !== null && lead.partPaymentAmount !== undefined && lead.partPaymentAmount > 0) 
+              ? lead.partPaymentAmount 
+              : (lead.totalPayment || 0))
+          : (lead.totalPayment || 0)).toString()
       ];
       if (sheetName === 'PART_PAYMENT') {
         const dateStr = lead.paymentDate ? (() => {
@@ -339,7 +343,13 @@ export default function SimpleLeadTable({
                 <td style={{ color: 'var(--text-muted)' }}>{lead.mobileNumber}</td>
                 <td style={{ color: 'var(--text-primary)' }}>{lead.webinarId || lead.webinarName || '-'}</td>
                 <td style={{ color: 'var(--text-muted)' }}>{lead.state || '-'}</td>
-                <td style={{ color: lead.partPaymentAmount ? (lead.partPaymentAmount > 0 ? '#34d399' : 'var(--text-primary)') : 'var(--text-primary)' }}>₹{lead.totalPayment}</td>
+                <td style={{ color: sheetName === 'PART_PAYMENT' ? ((lead.partPaymentAmount && lead.partPaymentAmount > 0) ? '#34d399' : 'var(--text-primary)') : (lead.totalPayment > 0 ? '#34d399' : 'var(--text-primary)') }}>
+                  ₹{sheetName === 'PART_PAYMENT' 
+                    ? ((lead.partPaymentAmount !== null && lead.partPaymentAmount !== undefined && lead.partPaymentAmount > 0) 
+                        ? lead.partPaymentAmount 
+                        : lead.totalPayment) 
+                    : lead.totalPayment}
+                </td>
                 {sheetName === 'PART_PAYMENT' && (
                   <td style={{ color: 'var(--text-primary)' }}>
                     {lead.paymentDate ? (() => {
