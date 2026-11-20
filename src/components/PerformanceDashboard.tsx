@@ -72,14 +72,23 @@ export default function PerformanceDashboard({
 }) {
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null)
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null)
-  const [filterDepartment, setFilterDepartment] = useState(defaultDepartment || '')
+  const [departmentView, setDepartmentView] = useState<'all' | 'sales' | 'recovery'>(
+    user.department === 'RECOVERY' ? 'recovery' : user.department === 'SALES' ? 'sales' : (defaultDepartment === 'RECOVERY' ? 'recovery' : defaultDepartment === 'SALES' ? 'sales' : 'all')
+  )
+  const [filterDepartment, setFilterDepartment] = useState(
+    user.department === 'RECOVERY' ? 'RECOVERY' : user.department === 'SALES' ? 'SALES' : (defaultDepartment || '')
+  )
   const [filterExecutive, setFilterExecutive] = useState('')
   const [filterWebinar, setFilterWebinar] = useState('')
 
   // Sync defaultDepartment if it changes from parent tabs
   useEffect(() => {
-    if (defaultDepartment) {
-      setFilterDepartment(defaultDepartment);
+    if (defaultDepartment === 'RECOVERY') {
+      setDepartmentView('recovery');
+      setFilterDepartment('RECOVERY');
+    } else if (defaultDepartment === 'SALES') {
+      setDepartmentView('sales');
+      setFilterDepartment('SALES');
     }
   }, [defaultDepartment]);
 
@@ -88,6 +97,13 @@ export default function PerformanceDashboard({
     return initialLeads.filter((l) => {
       const exec = l.assignments?.[0]?.user;
       
+      // Department View Filtering
+      if (departmentView === 'sales') {
+        if (exec?.department !== 'SALES') return false;
+      } else if (departmentView === 'recovery') {
+        if (exec?.department !== 'RECOVERY') return false;
+      }
+
       // Admin/TL Specific Filters
       if (user.isAdmin) {
          if (filterDepartment && exec?.department !== filterDepartment) return false;
@@ -100,7 +116,7 @@ export default function PerformanceDashboard({
       
       return true;
     });
-  }, [initialLeads, filterDepartment, filterExecutive, filterWebinar, user])
+  }, [initialLeads, departmentView, filterDepartment, filterExecutive, filterWebinar, user])
 
   // Top KPIs
   const isLeadInDateRange = useCallback((l:LeadMetrics, dateField: string | Date | null) => {
@@ -111,11 +127,13 @@ export default function PerformanceDashboard({
       if (filterEndDate) { const e = new Date(filterEndDate); e.setHours(23,59,59,999); if (cDate > e) return false; }
     }
     const exec = l.assignments?.[0]?.user;
+    if (departmentView === 'sales' && exec?.department !== 'SALES') return false;
+    if (departmentView === 'recovery' && exec?.department !== 'RECOVERY') return false;
     if (user.isAdmin && filterDepartment && exec?.department !== filterDepartment) return false;
     if ((user.isAdmin || user.isTL) && filterExecutive && exec?.id !== filterExecutive) return false;
     if (filterWebinar && l.webinarId !== filterWebinar) return false;
     return true;
-  },[filterStartDate,filterEndDate,filterDepartment,filterExecutive,filterWebinar,user.isAdmin,user.isTL]);
+  },[filterStartDate,filterEndDate,departmentView,filterDepartment,filterExecutive,filterWebinar,user.isAdmin,user.isTL]);
 
   const totalLeads = filteredLeads.length;
   
@@ -217,6 +235,57 @@ export default function PerformanceDashboard({
     }, 0);
   }, [initialLeads, isLeadInDateRange]);
 
+  const totalFullPayment = useMemo(() => {
+    return initialLeads.reduce((sum: number, l) => {
+      if (!isLeadInDateRange(l, l.paymentDate || l.createdAt)) return sum;
+      const amt = (l.fullPaymentAmount !== null && l.fullPaymentAmount !== undefined && l.fullPaymentAmount > 0)
+        ? l.fullPaymentAmount
+        : (l.paymentStatus === 'FULL_PAYMENT' ? (l.totalPayment || 0) : 0);
+      return sum + amt;
+    }, 0);
+  }, [initialLeads, isLeadInDateRange]);
+
+  const totalSalesRevenue = useMemo(() => {
+    return initialLeads.reduce((sum: number, l) => {
+      if (!isLeadInDateRange(l, l.updateStatusDate || l.updatedAt)) return sum;
+      const isRecovery = l.assignments?.[0]?.user?.department === 'RECOVERY';
+      if (isRecovery) return sum;
+      const salesAmt = (l.salesAmount !== null && l.salesAmount !== undefined && l.salesAmount > 0)
+        ? l.salesAmount
+        : ((l.paymentStatus !== 'PART_PAYMENT' && l.paymentStatus !== 'FULL_PAYMENT') ? (l.totalPayment || 0) : 0);
+      return sum + salesAmt;
+    }, 0);
+  }, [initialLeads, isLeadInDateRange]);
+
+  const totalRecoveryRevenue = useMemo(() => {
+    return initialLeads.reduce((sum: number, l) => {
+      if (!isLeadInDateRange(l, l.updateStatusDate || l.updatedAt)) return sum;
+      return sum + (l.recoveryAmount || 0);
+    }, 0);
+  }, [initialLeads, isLeadInDateRange]);
+
+  const totalAllRevenue = useMemo(() => {
+    return totalPartPayment + totalFullPayment + totalSalesRevenue + totalRecoveryRevenue;
+  }, [totalPartPayment, totalFullPayment, totalSalesRevenue, totalRecoveryRevenue]);
+
+  const allConvertedLeads = useMemo(() => {
+    return initialLeads.filter((l) => {
+      if (!isLeadInDateRange(l, l.paymentDate || l.updateStatusDate || l.updatedAt || l.createdAt)) return false;
+      return (l.totalPayment || 0) >= 1000 || (l.salesAmount || 0) >= 1000 || (l.partPaymentAmount || 0) >= 1000 || (l.fullPaymentAmount || 0) >= 1000;
+    }).length;
+  }, [initialLeads, isLeadInDateRange]);
+
+  const allConversionRate = totalLeads ? ((allConvertedLeads / totalLeads) * 100).toFixed(2) : '0.00';
+
+  const salesConvertedLeads = useMemo(() => {
+    return initialLeads.filter((l) => {
+      if (!isLeadInDateRange(l, l.paymentDate || l.updateStatusDate || l.updatedAt || l.createdAt)) return false;
+      return (l.totalPayment || 0) >= 1000 || (l.salesAmount || 0) >= 1000;
+    }).length;
+  }, [initialLeads, isLeadInDateRange]);
+
+  const salesConversionRate = totalLeads ? ((salesConvertedLeads / totalLeads) * 100).toFixed(2) : '0.00';
+
   const recoveryConvertedLeads = useMemo(() => {
     return initialLeads.filter((l) => {
       if (!isLeadInDateRange(l, l.updateStatusDate || l.updatedAt)) return false;
@@ -245,7 +314,8 @@ export default function PerformanceDashboard({
     }).length;
   }, [initialLeads, isLeadInDateRange]);
 
-  const isRecovery = user.department === 'RECOVERY' || filterDepartment === 'RECOVERY';
+  const isRecovery = departmentView === 'recovery';
+  const isSales = departmentView === 'sales';
   
   const assignedLeads = filteredLeads.filter((l) => {
     const relevantAssignments = l.assignments ? l.assignments.filter((a) => a.user?.department !== 'TECHNICAL') : [];
@@ -386,13 +456,15 @@ export default function PerformanceDashboard({
     initialLeads.forEach((l) => {
       const exec = l.assignments?.[0]?.user;
       if (exec && !ids.has(exec.id)) {
+        if (departmentView === 'sales' && exec.department !== 'SALES') return;
+        if (departmentView === 'recovery' && exec.department !== 'RECOVERY') return;
         if (!user.isAdmin && exec.department !== user.department) return;
         ids.add(exec.id);
         list.push(exec);
       }
     });
     return list;
-  }, [initialLeads, user]);
+  }, [initialLeads, departmentView, user]);
 
   const uniqueWebinars = useMemo(() => {
     const list = new Set<string>();
@@ -422,7 +494,17 @@ export default function PerformanceDashboard({
                 <select 
                   className="perf-filter-btn" 
                   value={filterDepartment} 
-                  onChange={e => setFilterDepartment(e.target.value)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setFilterDepartment(val);
+                    if (val === 'SALES') {
+                      setDepartmentView('sales');
+                    } else if (val === 'RECOVERY') {
+                      setDepartmentView('recovery');
+                    } else if (!val) {
+                      setDepartmentView('all');
+                    }
+                  }}
                   style={{ appearance: 'none', paddingRight: '28px', paddingLeft: '32px' }}
                 >
                   <option value="">All Teams</option>
@@ -470,10 +552,11 @@ export default function PerformanceDashboard({
               customInput={<CustomDateInput />}
               dateFormat="MMM d, yyyy"
             />
-            {(filterDepartment || filterExecutive || filterWebinar || filterStartDate || filterEndDate) && (
+            {(filterDepartment || filterExecutive || filterWebinar || filterStartDate || filterEndDate || departmentView !== 'all') && (
               <button 
                 onClick={() => {
                   setFilterDepartment('');
+                  setDepartmentView('all');
                   setFilterExecutive('');
                   setFilterWebinar('');
                   setFilterStartDate(null);
@@ -489,6 +572,70 @@ export default function PerformanceDashboard({
           </div>
         </div>
       </header>
+
+      {/* DEPARTMENT VIEW TOGGLE (ADMIN / TL) */}
+      {(user.isAdmin || user.isTL) && user.department !== 'TECHNICAL' && (
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>Department View:</span>
+          <button
+            onClick={() => {
+              setDepartmentView('all');
+              setFilterDepartment('');
+            }}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '6px',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: departmentView === 'all' ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
+              background: departmentView === 'all' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255,255,255,0.03)',
+              color: departmentView === 'all' ? '#60a5fa' : 'var(--text-muted)',
+              transition: 'all 0.2s'
+            }}
+          >
+            🌐 All View
+          </button>
+          <button
+            onClick={() => {
+              setDepartmentView('sales');
+              setFilterDepartment('SALES');
+            }}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '6px',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: departmentView === 'sales' ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.1)',
+              background: departmentView === 'sales' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.03)',
+              color: departmentView === 'sales' ? '#4ade80' : 'var(--text-muted)',
+              transition: 'all 0.2s'
+            }}
+          >
+            💼 Sales View
+          </button>
+          <button
+            onClick={() => {
+              setDepartmentView('recovery');
+              setFilterDepartment('RECOVERY');
+            }}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '6px',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: departmentView === 'recovery' ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
+              background: departmentView === 'recovery' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255,255,255,0.03)',
+              color: departmentView === 'recovery' ? '#c084fc' : 'var(--text-muted)',
+              transition: 'all 0.2s'
+            }}
+          >
+            🛡️ Recovery View
+          </button>
+        </div>
+      )}
 
       {/* KPI GRID */}
       {user.department === 'TECHNICAL' ? (
@@ -515,7 +662,7 @@ export default function PerformanceDashboard({
         <div className="perf-metric-grid">
           <MetricCard title="Total Leads" value={totalLeads} icon={UserRound} color={COLORS.primary} trend={12.5} trendLabel="from last 30 days" />
           <MetricCard title="Part Payment" value={formatCurrency(totalPartPayment)} icon={IndianRupee} color={COLORS.warning} trend={0} />
-          <MetricCard title="Recovered Amount" value={formatCurrency(totalRecovery)} icon={ShieldCheck} color={COLORS.secondary} trend={10.5} />
+          <MetricCard title="Recovered Amount" value={formatCurrency(totalRecoveryRevenue)} icon={ShieldCheck} color={COLORS.secondary} trend={10.5} />
           <MetricCard title="Total Calls" value={totalCalls} icon={Phone} color={COLORS.primary} trend={0} />
           <MetricCard title="Connected Calls" value={connectedCalls} icon={PhoneCall} color={COLORS.success} trend={25} />
           <MetricCard title="Not Connected" value={notConnected} icon={PhoneMissed} color={COLORS.danger} trend={0} />
@@ -524,50 +671,37 @@ export default function PerformanceDashboard({
           <MetricCard title="Follow-ups Due" value={followUpsDue} icon={AlarmClock} color={COLORS.warning} trend={-33.3} />
           <MetricCard title="Today's Follow Up" value={todaysFollowUps} icon={Calendar} color={COLORS.pink} trend={0} />
         </div>
+      ) : isSales ? (
+        <div className="perf-metric-grid">
+          <MetricCard title="Total Leads" value={totalLeads} icon={UserRound} color={COLORS.primary} trend={12.5} trendLabel="from last 30 days" />
+          <MetricCard title="Active Leads" value={activeLeads} icon={Flame} color={COLORS.warning} trend={11.3} />
+          <MetricCard title="Closed Leads" value={closedLeads} icon={Award} color={COLORS.success} trend={100} />
+          <MetricCard title="Paid & Closed" value={paidClosedLeads} icon={CheckCircle2} color={COLORS.success} trend={0} />
+          <MetricCard title="Converted Leads" value={salesConvertedLeads} icon={Target} color={COLORS.pink} trend={0} />
+          <MetricCard title="Sales Revenue" value={formatCurrency(totalSalesRevenue)} icon={IndianRupee} color={COLORS.secondary} trend={8.7} />
+          <MetricCard title="Total Calls" value={totalCalls} icon={Phone} color={COLORS.primary} trend={0} />
+          <MetricCard title="Connected Calls" value={connectedCalls} icon={PhoneCall} color={COLORS.success} trend={25} />
+          <MetricCard title="Not Connected" value={notConnected} icon={PhoneMissed} color={COLORS.danger} trend={0} />
+          <MetricCard title="Untouched Leads" value={untouchedLeads} icon={Inbox} color={COLORS.primary} trend={-5.8} />
+          <MetricCard title="Conversion Rate" value={`${salesConversionRate}%`} icon={Rocket} color={COLORS.primary} trend={0.18} />
+          <MetricCard title="Follow-ups Due" value={followUpsDue} icon={AlarmClock} color={COLORS.warning} trend={-33.3} />
+        </div>
       ) : (
         <div className="perf-metric-grid">
-            <MetricCard title="Total Leads" value={totalLeads} icon={UserRound} color={COLORS.primary} trend={12.5} trendLabel="from last 30 days" />
-            {(user.isAdmin || user.department === 'SALES') && (
-              <>
-                <MetricCard title="Active Leads" value={activeLeads} icon={Flame} color={COLORS.warning} trend={11.3} />
-                <MetricCard title="Closed Leads" value={closedLeads} icon={Award} color={COLORS.success} trend={100} />
-                <MetricCard title="Paid & Closed" value={paidClosedLeads} icon={CheckCircle2} color={COLORS.success} trend={0} />
-                <MetricCard title="Converted Leads" value={convertedLeads} icon={Target} color={COLORS.pink} trend={0} />
-              </>
-            )}
-            
-            {user.role !== 'EXEC' && (
-              <>
-                <MetricCard title="Assigned Leads" value={assignedLeads} icon={UserPlus} color={COLORS.primary} trend={0} />
-                <MetricCard title="Unassigned Leads" value={unassignedLeads} icon={UserMinus} color={COLORS.danger} trend={0} />
-              </>
-            )}
-            {(user.isAdmin || user.department === 'SALES') && (
-              <MetricCard title="Total Revenue" value={formatCurrency(totalRevenue)} icon={IndianRupee} color={COLORS.secondary} trend={8.7} />
-            )}
-            
-            {user.isAdmin && (
-              <>
-                <MetricCard title="Part Payment" value={formatCurrency(totalPartPayment)} icon={IndianRupee} color={COLORS.warning} trend={0} />
-                <MetricCard title="Recovered Amount" value={formatCurrency(totalRecovery)} icon={ShieldCheck} color={COLORS.secondary} trend={10.5} />
-                <MetricCard title="Recovery Rate" value={`${recoveryRate}%`} icon={TrendingUp} color={COLORS.success} trend={0.18} />
-              </>
-            )}
-            
-            <MetricCard title="Total Calls" value={totalCalls} icon={Phone} color={COLORS.primary} trend={0} />
-            <MetricCard title="Connected Calls" value={connectedCalls} icon={PhoneCall} color={COLORS.success} trend={25} />
-            <MetricCard title="Not Connected" value={notConnected} icon={PhoneMissed} color={COLORS.danger} trend={0} />
-            <MetricCard title="Untouched Leads" value={untouchedLeads} icon={Inbox} color={COLORS.primary} trend={-5.8} />
-            
-            {(user.isAdmin || user.department === 'SALES') && (
-              <MetricCard title="Conversion Rate" value={`${conversionRate}%`} icon={Rocket} color={COLORS.primary} trend={0.18} />
-            )}
-            
-            <MetricCard title="Follow-ups Due" value={followUpsDue} icon={AlarmClock} color={COLORS.warning} trend={-33.3} />
-            
-            {(user.isAdmin) && (
-              <MetricCard title="Pending Queries" value={pendingIssues} icon={MonitorOff} color={COLORS.pink} trend={0} />
-            )}
+          <MetricCard title="Total Leads" value={totalLeads} icon={UserRound} color={COLORS.primary} trend={12.5} trendLabel="from last 30 days" />
+          <MetricCard title="Assigned Leads" value={assignedLeads} icon={UserPlus} color={COLORS.primary} trend={0} />
+          <MetricCard title="Unassigned Leads" value={unassignedLeads} icon={UserMinus} color={COLORS.danger} trend={0} />
+          <MetricCard title="Total Revenue" value={formatCurrency(totalAllRevenue)} icon={IndianRupee} color={COLORS.success} trend={8.7} />
+          <MetricCard title="Part Payment" value={formatCurrency(totalPartPayment)} icon={IndianRupee} color={COLORS.warning} trend={0} />
+          <MetricCard title="Full Payment" value={formatCurrency(totalFullPayment)} icon={ShieldCheck} color={COLORS.success} trend={0} />
+          <MetricCard title="Sales Revenue" value={formatCurrency(totalSalesRevenue)} icon={DollarSign} color={COLORS.secondary} trend={8.7} />
+          <MetricCard title="Recovery Team Revenue" value={formatCurrency(totalRecoveryRevenue)} icon={ShieldCheck} color={COLORS.pink} trend={10.5} />
+          <MetricCard title="Conversion Rate" value={`${allConversionRate}%`} icon={Rocket} color={COLORS.primary} trend={0.18} />
+          <MetricCard title="Total Calls" value={totalCalls} icon={Phone} color={COLORS.primary} trend={0} />
+          <MetricCard title="Connected Calls" value={connectedCalls} icon={PhoneCall} color={COLORS.success} trend={25} />
+          <MetricCard title="Not Connected" value={notConnected} icon={PhoneMissed} color={COLORS.danger} trend={0} />
+          <MetricCard title="Untouched Leads" value={untouchedLeads} icon={Inbox} color={COLORS.primary} trend={-5.8} />
+          <MetricCard title="Follow-ups Due" value={followUpsDue} icon={AlarmClock} color={COLORS.warning} trend={-33.3} />
         </div>
       )}
 
