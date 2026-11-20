@@ -100,7 +100,8 @@ export function leadFilters(q: LeadQuery) {
   if(q.assignment==='ASSIGNED') conditions.push(assigned(Prisma.sql`u.department<>'TECHNICAL'`))
   if(q.team) conditions.push(assigned(Prisma.sql`u.department=${q.team}`))
   if(q.executive && q.executive!=='UNASSIGNED') conditions.push(assigned(Prisma.sql`u.id=${q.executive}`))
-  for(const [start,end,column] of [[q.start,q.end,field('createdAt')],[q.followStart,q.followEnd,field('nextFollowUpDate')],[q.lastCallStart,q.lastCallEnd,Prisma.sql`(SELECT max(c."createdAt") FROM "CallRecord" c WHERE c."leadId"=l.id)`]] as const){
+  const dateCol = ['PART_PAYMENT','FULL_PAYMENT'].includes(q.sheet) ? Prisma.sql`coalesce(l."paymentDate", l."createdAt")` : field('createdAt')
+  for(const [start,end,column] of [[q.start,q.end,dateCol],[q.followStart,q.followEnd,field('nextFollowUpDate')],[q.lastCallStart,q.lastCallEnd,Prisma.sql`(SELECT max(c."createdAt") FROM "CallRecord" c WHERE c."leadId"=l.id)`]] as const){
     if(start){if(!Number.isFinite(Date.parse(start)))throw new Error('Invalid date');conditions.push(Prisma.sql`${column}>=${new Date(start)}`)}
     if(end){if(!Number.isFinite(Date.parse(end)))throw new Error('Invalid date');conditions.push(Prisma.sql`${column}<=${new Date(end)}`)}
   }

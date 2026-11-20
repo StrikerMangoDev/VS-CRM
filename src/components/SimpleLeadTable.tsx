@@ -105,77 +105,90 @@ export default function SimpleLeadTable({
   }
 
   const displayedLeads = leads.map(l => overrides[l.id] ? { ...l, ...overrides[l.id] } : l)
+  const [isExporting, setIsExporting] = useState(false)
 
   const exportToCSV = async () => {
-    const exportLeads = await allMatchingLeads(queryFilters)
-    const headers = [
-      'Lead ID',
-      'Name',
-      'Email',
-      'Mobile',
-      'Webinar ID',
-      'State',
-      sheetName === 'PART_PAYMENT' ? 'Part Payment' : sheetName === 'FULL_PAYMENT' ? 'Full Payment' : 'Total Paid'
-    ];
-    if (sheetName === 'PART_PAYMENT') {
-      headers.push('Part Payment Date');
-    }
-    headers.push('Call Status', 'Remark 1', 'Remark 2', 'Next Follow Up', 'Lead Owner', 'Lead Status');
-    customColumns.forEach(col => {
-      headers.push(col.name);
-    });
-
-    const rows = exportLeads.map(lead => {
-      const baseRow = [
-        sheetName === 'PART_PAYMENT' ? (lead.partPaymentId || lead.uniqueId) : sheetName === 'FULL_PAYMENT' ? (lead.fullPaymentId || lead.uniqueId) : lead.uniqueId,
-        lead.name,
-        lead.email || '-',
-        lead.mobileNumber,
-        lead.webinarId || lead.webinarName || '-',
-        lead.state || '-',
-        (sheetName === 'PART_PAYMENT' 
-          ? ((lead.partPaymentAmount !== null && lead.partPaymentAmount !== undefined && lead.partPaymentAmount > 0) 
-              ? lead.partPaymentAmount 
-              : (lead.totalPayment || 0))
-          : (lead.totalPayment || 0)).toString()
+    try {
+      setIsExporting(true)
+      const exportLeads = await allMatchingLeads(queryFilters)
+      if (exportLeads.length === 0) {
+        alert('No leads found to export matching the current filters.')
+        return
+      }
+      const headers = [
+        'Lead ID',
+        'Name',
+        'Email',
+        'Mobile',
+        'Webinar ID',
+        'State',
+        sheetName === 'PART_PAYMENT' ? 'Part Payment' : sheetName === 'FULL_PAYMENT' ? 'Full Payment' : 'Total Paid'
       ];
       if (sheetName === 'PART_PAYMENT') {
-        const dateStr = lead.paymentDate ? (() => {
-          const d = new Date(lead.paymentDate);
-          return `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear()}`;
-        })() : '-';
-        baseRow.push(dateStr);
+        headers.push('Part Payment Date');
       }
-      baseRow.push(
-        lead.callStatus || 'UNTOUCHED',
-        lead.remark1 || '-',
-        lead.remark2 || '-',
-        lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString('en-GB') : '-',
-        lead.assignments && lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').length > 0
-          ? lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').map((a) => `${a.user.name} (${a.user.department})`).join('; ')
-          : 'Unassigned',
-        lead.leadStatus === 'CLOSED_FULL_PAYMENT' ? 'Full Payment Done (Close)' : lead.leadStatus?.startsWith('CLOSED') ? 'Closed Lead' : (lead.leadStatus || 'In Progress')
-      );
+      headers.push('Call Status', 'Remark 1', 'Remark 2', 'Next Follow Up', 'Lead Owner', 'Lead Status');
       customColumns.forEach(col => {
-        let val = '-';
-        try {
-          const parsed = JSON.parse(lead.customData || '{}');
-          val = parsed[col.name] || parsed[col.id] || '-';
-        } catch {}
-        baseRow.push(val);
+        headers.push(col.name);
       });
-      return baseRow;
-    });
 
-    const csvContent = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${sheetName.toLowerCase().replace(/_/g, '-')}_leads_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      const rows = exportLeads.map(lead => {
+        const baseRow = [
+          sheetName === 'PART_PAYMENT' ? (lead.partPaymentId || lead.uniqueId) : sheetName === 'FULL_PAYMENT' ? (lead.fullPaymentId || lead.uniqueId) : lead.uniqueId,
+          lead.name,
+          lead.email || '-',
+          lead.mobileNumber,
+          lead.webinarId || lead.webinarName || '-',
+          lead.state || '-',
+          (sheetName === 'PART_PAYMENT' 
+            ? ((lead.partPaymentAmount !== null && lead.partPaymentAmount !== undefined && lead.partPaymentAmount > 0) 
+                ? lead.partPaymentAmount 
+                : (lead.totalPayment || 0))
+            : (lead.totalPayment || 0)).toString()
+        ];
+        if (sheetName === 'PART_PAYMENT') {
+          const dateStr = lead.paymentDate ? (() => {
+            const d = new Date(lead.paymentDate);
+            return `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear()}`;
+          })() : '-';
+          baseRow.push(dateStr);
+        }
+        baseRow.push(
+          lead.callStatus || 'UNTOUCHED',
+          lead.remark1 || '-',
+          lead.remark2 || '-',
+          lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString('en-GB') : '-',
+          lead.assignments && lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').length > 0
+            ? lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').map((a) => `${a.user.name} (${a.user.department})`).join('; ')
+            : 'Unassigned',
+          lead.leadStatus === 'CLOSED_FULL_PAYMENT' ? 'Full Payment Done (Close)' : lead.leadStatus?.startsWith('CLOSED') ? 'Closed Lead' : (lead.leadStatus || 'In Progress')
+        );
+        customColumns.forEach(col => {
+          let val = '-';
+          try {
+            const parsed = JSON.parse(lead.customData || '{}');
+            val = parsed[col.name] || parsed[col.id] || '-';
+          } catch {}
+          baseRow.push(val);
+        });
+        return baseRow;
+      });
+
+      const csvContent = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${sheetName.toLowerCase().replace(/_/g, '-')}_leads_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to export leads');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const confirm = useConfirm();
@@ -292,11 +305,21 @@ export default function SimpleLeadTable({
           </button>
 
           <button 
-            onClick={()=>{void exportToCSV().catch(()=>alert('Failed to export leads'))}}
+            onClick={() => void exportToCSV()}
+            disabled={isExporting}
             className="btn btn-primary"
-            style={{ padding: '8px 16px', fontSize: '0.8rem', height: 'fit-content', alignSelf: 'center', whiteSpace: 'nowrap', flexShrink: 0 }}
+            style={{ 
+              padding: '8px 16px', 
+              fontSize: '0.8rem', 
+              height: 'fit-content', 
+              alignSelf: 'center', 
+              whiteSpace: 'nowrap', 
+              flexShrink: 0,
+              opacity: isExporting ? 0.7 : 1,
+              cursor: isExporting ? 'not-allowed' : 'pointer'
+            }}
           >
-            Export CSV
+            {isExporting ? 'Exporting...' : 'Export CSV'}
           </button>
           {isAdmin && <AddColumnModal sheetName={sheetName} />}
         </div>
