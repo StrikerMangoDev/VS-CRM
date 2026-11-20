@@ -148,7 +148,7 @@ export default function EditSimpleLeadModal({
       });
 
       if (res.success && res.lead) {
-        toast.success('Lead updated successfully');
+        toast.success('Changes saved');
         onSave({
           id: lead.id,
           name: res.lead.name,

@@ -286,13 +286,13 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
   const handleSendWhatsApp = async (lead:import('@/lib/lead-query').LeadRow, templateName: string) => {
     const template = whatsappTemplates.find(t => t.name === templateName);
     if (!template) {
-      alert('Please select a valid template.');
+      toast.error('Please select a valid template.');
       return;
     }
 
     let phone = (lead.mobileNumber || '').replace(/\D/g, '');
     if (!phone) {
-      alert(`Lead "${lead.name}" does not have a valid mobile number.`);
+      toast.error(`Lead "${lead.name}" does not have a valid mobile number.`);
       return;
     }
     if (phone.length === 10) {
@@ -337,11 +337,11 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
         setTransferWebinarId('');
         router.refresh()
       } else {
-        alert(res.error || 'Failed to transfer lead');
+        toast.error(res.error || 'Failed to transfer lead');
       }
     } catch (e) {
       console.error(e);
-      alert(actionErrorMessage(e, 'Error transferring lead'));
+      toast.error(actionErrorMessage(e, 'Error transferring lead'));
     } finally {
       setIsTransferring(false);
     }
@@ -374,7 +374,7 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
       await removeLeadFromSheetAction(leadId, sheetName);
       setLocalLeads(prev => prev.filter(l => l.id !== leadId))
     } catch {
-      alert('Failed to remove lead');
+      toast.error('Failed to remove lead');
     }
   }
 
@@ -389,9 +389,9 @@ export default function SalesTable({ initialPage, webinarFilter, isAdmin = false
       await updateLeadStatusAction(leadId, 'IN_PROGRESS');
       setLocalLeads(prev => prev.filter(l => l.id !== leadId));
       router.refresh();
-      alert('Lead moved to Active successfully.');
+      toast.success('Lead moved to Active successfully.');
     } catch {
-      alert('Failed to restore lead');
+      toast.error('Failed to restore lead');
     }
   }
 

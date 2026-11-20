@@ -5,6 +5,7 @@ import { updateLeadCompleteAction } from '@/app/actions/lead'
 import { actionErrorMessage } from '@/lib/action-error'
 import { MessageSquare,Send,Check,Lock,AlertCircle } from 'lucide-react'
 import { getWhatsAppTemplatesAction,updateLeadWhatsAppTemplateAction } from '@/app/actions/whatsappTemplate'
+import toast from 'react-hot-toast'
 
 export default function EditLeadModal({ 
   lead, 
@@ -101,7 +102,7 @@ export default function EditLeadModal({
 
     let phone = (lead.mobileNumber || '').replace(/\D/g, '');
     if (!phone) {
-      alert(`Lead "${lead.name}" does not have a valid mobile number.`);
+      toast.error(`Lead "${lead.name}" does not have a valid mobile number.`);
       return;
     }
     if (phone.length === 10) {
@@ -154,17 +155,17 @@ export default function EditLeadModal({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isReadOnly) {
-      alert('Edit access is restricted for executives on closed or full payment leads.')
+      toast.error('Edit access is restricted for executives on closed or full payment leads.')
       return
     }
 
     if (canEditDetails) {
       if (!formData.name.trim()) {
-        alert('Lead name is required.')
+        toast.error('Lead name is required.')
         return
       }
       if (!formData.mobileNumber.trim()) {
-        alert('Mobile number is required.')
+        toast.error('Mobile number is required.')
         return
       }
     }
@@ -199,17 +200,17 @@ export default function EditLeadModal({
       
     } catch (err) {
       console.error(err)
-      alert(actionErrorMessage(err, 'Failed to save changes.'))
+      toast.error(actionErrorMessage(err, 'Failed to save changes.'))
       return
     } finally {
       setIsSaving(false)
     }
     try {
       onSaveSuccess(savedLead)
-      alert('Lead updated successfully.')
+      toast.success('Changes saved')
     } catch (err) {
       console.error(err)
-      alert('Lead saved successfully. Refresh the page to see the updated details.')
+      toast.success('Changes saved')
     }
   }
 
