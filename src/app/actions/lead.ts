@@ -890,17 +890,18 @@ export async function createLeadAction(formData: FormData) {
     })
     
     if (leadInThisWebinar) {
-      if (paymentStatus === 'PART_PAYMENT' || paymentStatus === 'FULL_PAYMENT') {
+      if (paymentStatus === 'PART_PAYMENT') {
+        const currentPart = leadInThisWebinar.partPaymentAmount || 0;
+        const currentTotal = leadInThisWebinar.totalPayment || 0;
         await prisma.lead.update({
           where: { id: leadInThisWebinar.id },
           data: {
-            partPaymentAmount: paymentStatus === 'PART_PAYMENT' ? (leadInThisWebinar.partPaymentAmount || 0) + totalPayment : (leadInThisWebinar.partPaymentAmount || 0),
-            fullPaymentAmount: paymentStatus === 'FULL_PAYMENT' ? (leadInThisWebinar.fullPaymentAmount || 0) + totalPayment : (leadInThisWebinar.fullPaymentAmount || 0),
-            totalPayment: (leadInThisWebinar.totalPayment || 0) + totalPayment,
+            partPaymentAmount: currentPart + totalPayment,
+            totalPayment: currentTotal + totalPayment,
             paymentStatus: paymentStatus,
             leadStatus: leadInThisWebinar.leadStatus?.startsWith('CLOSED') ? 'Fresh Lead' : leadInThisWebinar.leadStatus,
-            partPaymentId: (paymentStatus === 'PART_PAYMENT' && !leadInThisWebinar.partPaymentId) ? await generateNextPartPaymentId() : leadInThisWebinar.partPaymentId,
-            fullPaymentId: (paymentStatus === 'FULL_PAYMENT' && !leadInThisWebinar.fullPaymentId) ? await generateNextFullPaymentId() : leadInThisWebinar.fullPaymentId
+            partPaymentId: !leadInThisWebinar.partPaymentId ? await generateNextPartPaymentId() : leadInThisWebinar.partPaymentId,
+            updateStatusDate: totalPayment > 0 ? new Date() : leadInThisWebinar.updateStatusDate
           }
         })
         revalidatePath('/')
@@ -1333,7 +1334,7 @@ export async function bulkUploadChunkAction(rows: Record<string, string>[], defa
       if (!Number.isFinite(totalPayment) || totalPayment < 0) throw new Error('Invalid payment amount');
       totalPayment = Math.round(totalPayment * 100) / 100;
       const receipt = createHash('sha256').update(JSON.stringify([defaultPaymentStatus, mobileNumber, webinarId, webinarName, totalPayment, Object.entries(row).map(([k,v]) => [k.trim().toLowerCase(), String(v).trim()]).sort(([a], [b]) => a.localeCompare(b))])).digest('hex');
-      if (defaultPaymentStatus !== 'NO_PAYMENT') {
+      if (defaultPaymentStatus !== 'NO_PAYMENT' && defaultPaymentStatus !== 'PART_PAYMENT') {
         if (await prisma.paymentImport.findUnique({ where: { fingerprint: receipt } })) return 'duplicate';
       }
       const partPayment = Number(row['part payment'] || 0);
@@ -1354,7 +1355,7 @@ export async function bulkUploadChunkAction(rows: Record<string, string>[], defa
       if (rawPaymentDate && (!/^\d{2}-\d{2}-\d{4}$/.test(rawPaymentDate.trim()) || !parsedPaymentDate || parsedPaymentDate.getUTCDate() !== Number(rawPaymentDate.slice(0,2)) || parsedPaymentDate.getUTCMonth() + 1 !== Number(rawPaymentDate.slice(3,5)))) throw new Error('Invalid payment date');
       if ([partPayment, fullPayment, discount].some(n => !Number.isFinite(n) || n < 0)) throw new Error('Invalid amount');
       if (webinarId && !await prisma.webinarMaster.findUnique({ where: { id: webinarId } })) throw new Error('Unknown webinar');
-      if (defaultPaymentStatus !== 'NO_PAYMENT') await prisma.paymentImport.create({ data: { fingerprint: receipt } });
+      if (defaultPaymentStatus !== 'NO_PAYMENT' && defaultPaymentStatus !== 'PART_PAYMENT') await prisma.paymentImport.create({ data: { fingerprint: receipt } });
       const customDataObj: Record<string, string> = {};
       if (expectedColumnsStr) {
         const allExpected = JSON.parse(expectedColumnsStr);
@@ -1380,17 +1381,22 @@ export async function bulkUploadChunkAction(rows: Record<string, string>[], defa
           OR.push({ email: mobileNumber });
         }
 
+        const webinarConditions: import('@prisma/client').Prisma.LeadWhereInput[] = [];
+        if (webinarId) {
+          webinarConditions.push({ webinarId: { equals: webinarId, mode: 'insensitive' } });
+          webinarConditions.push({ webinarName: { equals: webinarId, mode: 'insensitive' } });
+        }
+        if (webinarName) {
+          webinarConditions.push({ webinarName: { equals: webinarName, mode: 'insensitive' } });
+          webinarConditions.push({ webinarId: { equals: webinarName, mode: 'insensitive' } });
+        }
+
         // Check if lead already exists in THIS current webinar
         const leadInThisWebinar = await prisma.lead.findFirst({
           where: {
             AND: [
               { OR },
-              {
-                OR: [
-                  ...(webinarId ? [{ webinarId }] : []),
-                  ...(webinarName ? [{ webinarName }] : [])
-                ]
-              }
+              ...(webinarConditions.length > 0 ? [{ OR: webinarConditions }] : [])
             ]
           },
           include: { assignments: true },
@@ -1398,23 +1404,27 @@ export async function bulkUploadChunkAction(rows: Record<string, string>[], defa
         });
         
         if (leadInThisWebinar) {
-          if (defaultPaymentStatus === 'PART_PAYMENT' || defaultPaymentStatus === 'FULL_PAYMENT') {
+          // In Part Payment sheet: duplicate lead's amount is summed when in the same webinar
+          if (defaultPaymentStatus === 'PART_PAYMENT') {
+            const currentPartPayment = leadInThisWebinar.partPaymentAmount || 0;
+            const currentTotalPayment = leadInThisWebinar.totalPayment || 0;
+            const newPartPayment = currentPartPayment + totalPayment;
+            const newTotalPayment = currentTotalPayment + totalPayment;
+
             await prisma.lead.update({
               where: { id: leadInThisWebinar.id },
               data: {
-                partPaymentAmount: defaultPaymentStatus === 'PART_PAYMENT' ? (leadInThisWebinar.partPaymentAmount || 0) + totalPayment : (leadInThisWebinar.partPaymentAmount || 0),
-                fullPaymentAmount: defaultPaymentStatus === 'FULL_PAYMENT' ? (leadInThisWebinar.fullPaymentAmount || 0) + totalPayment : (leadInThisWebinar.fullPaymentAmount || 0),
-                totalPayment: (leadInThisWebinar.totalPayment || 0) + totalPayment,
-                discount,
+                partPaymentAmount: newPartPayment,
+                totalPayment: newTotalPayment,
+                discount: discount || leadInThisWebinar.discount,
                 paymentDate: parsedPaymentDate || leadInThisWebinar.paymentDate,
-                paymentStatus: defaultPaymentStatus,
+                paymentStatus: 'PART_PAYMENT',
                 leadStatus: leadInThisWebinar.leadStatus?.startsWith('CLOSED') ? 'Fresh Lead' : leadInThisWebinar.leadStatus,
-                partPaymentId: (defaultPaymentStatus === 'PART_PAYMENT' && !leadInThisWebinar.partPaymentId) ? await generateNextPartPaymentId() : leadInThisWebinar.partPaymentId,
-                fullPaymentId: (defaultPaymentStatus === 'FULL_PAYMENT' && !leadInThisWebinar.fullPaymentId) ? await generateNextFullPaymentId() : leadInThisWebinar.fullPaymentId,
-                customData: customDataStr,
+                partPaymentId: !leadInThisWebinar.partPaymentId ? await generateNextPartPaymentId() : leadInThisWebinar.partPaymentId,
+                customData: customDataStr !== "{}" ? customDataStr : leadInThisWebinar.customData,
                 updateStatusDate: totalPayment > 0 ? new Date() : leadInThisWebinar.updateStatusDate,
-                frozenLeadStatus: (!leadInThisWebinar.frozenLeadStatus && totalPayment >= 15999) ? calculateLeadStatus(parsedPaymentDate || leadInThisWebinar.paymentDate, null) : leadInThisWebinar.frozenLeadStatus,
-                frozenLeadLogStatus: (!leadInThisWebinar.frozenLeadLogStatus && totalPayment >= 15999) ? calculateLeadLogStatus(leadInThisWebinar.recoveryAssignedAt) : leadInThisWebinar.frozenLeadLogStatus
+                frozenLeadStatus: (!leadInThisWebinar.frozenLeadStatus && newTotalPayment >= 15999) ? calculateLeadStatus(parsedPaymentDate || leadInThisWebinar.paymentDate, null) : leadInThisWebinar.frozenLeadStatus,
+                frozenLeadLogStatus: (!leadInThisWebinar.frozenLeadLogStatus && newTotalPayment >= 15999) ? calculateLeadLogStatus(leadInThisWebinar.recoveryAssignedAt) : leadInThisWebinar.frozenLeadLogStatus
               }
             });
           }
