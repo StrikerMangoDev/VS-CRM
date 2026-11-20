@@ -70,13 +70,19 @@ integration('custom portals honor mapped team names and their parent department'
   await db.orgDepartment.update({where:{id:department.id},data:{userMatchRule:'Other Department'}})
   await assert.rejects(()=>run('exec',()=>auth.requireModuleAccess(module.id)),/Forbidden/)
 })
-integration('the same payment row is applied once, including concurrent retries', async () => {
+integration('part-payment duplicates accumulate while full-payment retries stay deduplicated', async () => {
   const lead = load('src/app/actions/lead.ts')
   const row = { name: 'Test lead', mobile: '9999999999', 'webinar id': webinar.id, 'total paid': '100' }
   await Promise.all([1,2,3].map(() => run('admin', () => lead.bulkUploadChunkAction([row], 'PART_PAYMENT', '[]'))))
   const saved = await db.lead.findUnique({ where: { id: original.id } })
-  assert.equal(saved.totalPayment,200)
-  assert.equal(saved.partPaymentAmount,200)
+  assert.equal(saved.totalPayment,400)
+  assert.equal(saved.partPaymentAmount,400)
+  assert.equal(await db.lead.count({where:{mobileNumber:row.mobile,webinarId:webinar.id}}),1)
+  const fullRow={name:'Full payment retry',mobile:'9988776611','webinar id':webinar.id,'total paid':'1500'}
+  await Promise.all([1,2,3].map(()=>run('admin',()=>lead.bulkUploadChunkAction([fullRow],'FULL_PAYMENT','[]'))))
+  const full=await db.lead.findFirstOrThrow({where:{mobileNumber:fullRow.mobile,webinarId:webinar.id}})
+  assert.equal(full.totalPayment,1500)
+  assert.equal(await db.lead.count({where:{mobileNumber:fullRow.mobile,webinarId:webinar.id}}),1)
 })
 integration('invalid attendance replacement preserves original records; valid replacement is atomic', async () => {
   const attendance = load('src/app/actions/attendance.ts')
@@ -252,17 +258,44 @@ integration('lead edits return persisted fields for Sales and Recovery and prese
   await db.session.create({data:{tokenHash:auth.tokenHash(token),userId:recovery.id,expiresAt:new Date(Date.now()+60000)}})
   await db.assignment.create({data:{leadId:original.id,userId:recovery.id,stage:'FRESH_LOG'}})
   const followUp=new Date('2026-11-04T12:30:00Z')
+  const initialPart=(await db.lead.findUniqueOrThrow({where:{id:original.id}})).partPaymentAmount
   const saved=await run('exec',()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'SALES',callStatus:'CALL_CONNECTED',remark1:'Saved sales note',remark2:'Second note',nextFollowUpDate:followUp,totalPayment:250,amount1:50}))
-  assert.equal(saved.remark1,'Saved sales note');assert.equal(saved.salesAmount,250)
+  assert.equal(saved.remark1,'Saved sales note');assert.equal(saved.salesAmount,50)
+  assert.equal(saved.totalPayment,initialPart+50)
   assert.equal(saved.nextFollowUpDate.toISOString(),followUp.toISOString())
-  const recovered=await withCookies({vscrm_session:token},()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'RECOVERY',remark2:'Recovery saved',totalPayment:300}))
-  assert.equal(recovered.recoveryAmount,300);assert.equal(recovered.salesAmount,250)
+  const recovered=await withCookies({vscrm_session:token},()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'RECOVERY',remark2:'Recovery saved',totalPayment:300,amount1:75,amount2:25}))
+  assert.equal(recovered.recoveryAmount,100);assert.equal(recovered.salesAmount,50)
+  assert.equal(recovered.totalPayment,initialPart+150)
   const persisted=await db.lead.findUnique({where:{id:original.id}})
+  assert.equal(persisted.partPaymentAmount,initialPart)
   for(const key of ['remark1','remark2','callStatus','amount1','totalPayment','salesAmount','recoveryAmount'])assert.equal(recovered[key],persisted[key])
   assert.ok(await db.auditHistory.count({where:{leadId:original.id,field:'Remark 1'}}))
   await assert.rejects(()=>run('exec',()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'RECOVERY',remark1:'Wrong department'})),/Forbidden/)
   await assert.rejects(()=>run('exec',()=>actions.updateLeadCompleteAction(original.id,{updaterDepartment:'SALES',nextFollowUpDate:new Date('invalid')})),/Invalid follow-up/)
   assert.equal((await db.lead.findUnique({where:{id:original.id}})).remark1,'Saved sales note')
+})
+
+integration('payment sheet edits preserve collected revenue, enforce roles and reject non-finite amounts',async()=>{
+  const actions=load('src/app/actions/lead.ts'),tag=randomBytes(5).toString('hex')
+  const paid=await db.lead.create({data:{uniqueId:'EDIT-PAID-'+tag,name:'Paid edit',mobileNumber:'9988776655',webinarId:webinar.id,paymentStatus:'PART_PAYMENT',partPaymentAmount:4000,totalPayment:4500,salesAmount:500,assignments:{create:{userId:users.exec.id,stage:'FRESH_LOG'}}}})
+  const edit={id:paid.id,name:'Updated paid edit',mobileNumber:paid.mobileNumber,amount:4500}
+  await assert.rejects(()=>run('exec',()=>actions.updateSimpleLeadAction(edit)),/Only Admin and Sales TL/)
+  await assert.rejects(()=>run('admin',()=>actions.updateSimpleLeadAction({...edit,amount:Infinity})),/Valid amount/)
+  const updated=await run('tl',()=>actions.updateSimpleLeadAction(edit))
+  assert.equal(updated.lead.partPaymentAmount,4500);assert.equal(updated.lead.totalPayment,5000)
+  const persisted=await db.lead.findUniqueOrThrow({where:{id:paid.id}})
+  assert.equal(persisted.salesAmount,500);assert.equal(persisted.name,edit.name)
+  assert.ok(await db.auditHistory.count({where:{leadId:paid.id,field:'Name'}}))
+})
+
+integration('payment sheet date filters and exports follow payment dates across every page',async()=>{
+  const tag='PAY-DATE-'+randomBytes(5).toString('hex'),payment=new Date('2026-11-20T10:00:00Z'),old=new Date('2020-01-01T00:00:00Z')
+  await db.lead.createMany({data:[...Array.from({length:32},(_,i)=>({uniqueId:tag+'-'+i,name:tag+' '+i,mobileNumber:'9988776644',paymentStatus:'PART_PAYMENT',partPaymentAmount:100,totalPayment:100,paymentDate:payment,createdAt:old})),{uniqueId:tag+'-old',name:tag+' old',mobileNumber:'9988776643',paymentStatus:'PART_PAYMENT',partPaymentAmount:100,totalPayment:100,paymentDate:old,createdAt:payment}]})
+  const actions=load('src/app/actions/lead-query.ts'),query={sheet:'PART_PAYMENT',search:tag,start:'2026-11-20T00:00:00Z',end:'2026-11-20T23:59:59Z',size:15,page:3}
+  const page=await run('admin',()=>actions.getLeadPage(query))
+  assert.equal(page.total,32);assert.equal(page.rows.length,2)
+  const ids=await run('admin',()=>actions.getLeadSelection(query))
+  assert.equal(ids.length,32);assert.equal(new Set(ids).size,32)
 })
 
 integration('webinar transfers reject invalid targets and repeats, retain history and allocate beyond imported IDs', async () => {

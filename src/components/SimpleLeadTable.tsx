@@ -76,7 +76,7 @@ export default function SimpleLeadTable({
   }
   const [requestedPage, setRequestedPage] = usePageNumber(JSON.stringify({ ...queryFilters, size: pageSize }))
   const query = { ...queryFilters, page: requestedPage, size: pageSize }
-  const { rows: leads, setRows, ...pageData } = useLeadPage(initialPage, query)
+  const { rows: leads, ...pageData } = useLeadPage(initialPage, query)
   const totalPages = Math.ceil(pageData.total / pageSize)
   const currentPage = Math.min(requestedPage, Math.max(1, totalPages))
   const setCurrentPage = (next: number | ((page: number) => number)) => setRequestedPage(typeof next === 'function' ? next(currentPage) : next)

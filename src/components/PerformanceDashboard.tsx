@@ -1,7 +1,7 @@
 'use client'
 import type { LeadMetrics,DashboardUser,TopPerformer,IssueView,Person,DateButtonProps } from '@/lib/view-types'
 
-import { useState,useEffect,useMemo,forwardRef,useCallback } from 'react'
+import { useState,useMemo,forwardRef,useCallback } from 'react'
 import {
 XAxis,YAxis,CartesianGrid,Tooltip as RechartsTooltip,ResponsiveContainer,
 PieChart,Pie,Cell,BarChart,Bar,Legend
@@ -80,17 +80,6 @@ export default function PerformanceDashboard({
   )
   const [filterExecutive, setFilterExecutive] = useState('')
   const [filterWebinar, setFilterWebinar] = useState('')
-
-  // Sync defaultDepartment if it changes from parent tabs
-  useEffect(() => {
-    if (defaultDepartment === 'RECOVERY') {
-      setDepartmentView('recovery');
-      setFilterDepartment('RECOVERY');
-    } else if (defaultDepartment === 'SALES') {
-      setDepartmentView('sales');
-      setFilterDepartment('SALES');
-    }
-  }, [defaultDepartment]);
 
   // Filter leads dynamically on client side
   const filteredLeads = useMemo(() => {
@@ -179,17 +168,6 @@ export default function PerformanceDashboard({
     return sum + (l.recoveryAmount || 0);
   }, 0);
   
-  const pendingRecovery = initialLeads.reduce((sum: number, l) => {
-    if (!isLeadInDateRange(l, l.updateStatusDate || l.updatedAt)) return sum;
-    if (l.paymentStatus === 'PART_PAYMENT') {
-      const payable = l.salesAmount || 15999;
-      const paid = l.totalPayment || 0;
-      const pending = payable - paid;
-      return sum + (pending > 0 ? pending : 0);
-    }
-    return sum;
-  }, 0);
-
   let connectedCalls = 0;
   let notConnected = 0;
 

@@ -257,7 +257,7 @@ export async function updateSimpleLeadAction(data: {
 
     if (!data.name || !data.name.trim()) throw new Error('Lead name is required');
     if (!data.mobileNumber || !data.mobileNumber.trim()) throw new Error('Mobile number is required');
-    if (data.amount === undefined || data.amount === null || isNaN(Number(data.amount)) || Number(data.amount) < 0) {
+    if (data.amount === undefined || data.amount === null || !Number.isFinite(Number(data.amount)) || Number(data.amount) < 0) {
       throw new Error('Valid amount is required');
     }
 
@@ -500,8 +500,8 @@ export async function updateLeadAmountsAction(leadId: string, amount1: number | 
   const enteredAmounts = (Number(amount1) || 0) + (Number(amount2) || 0) + (Number(amount3) || 0);
   let dept = updaterDepartment;
   if (!dept || dept === 'ADMIN' || dept === 'TL') {
-    const hasRecoveryAssignee = existingLead.assignments?.some((a: any) => a.user?.department === 'RECOVERY');
-    const hasSalesAssignee = existingLead.assignments?.some((a: any) => a.user?.department === 'SALES');
+    const hasRecoveryAssignee = existingLead.assignments?.some(a => a.user?.department === 'RECOVERY');
+    const hasSalesAssignee = existingLead.assignments?.some(a => a.user?.department === 'SALES');
     if (hasRecoveryAssignee) dept = 'RECOVERY';
     else if (hasSalesAssignee) dept = 'SALES';
     else if ((existingLead.partPaymentAmount || 0) > 0) dept = 'RECOVERY';

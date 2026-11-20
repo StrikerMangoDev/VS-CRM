@@ -1,14 +1,15 @@
 const assert=require('node:assert/strict'),fs=require('node:fs')
 const {expect}=require('@playwright/test')
 exports.seed=async function(db,actors,webinar,portal,tag){
-  const prefix='Pagination '+tag,partPrefix='Payment '+tag,portalPrefix='Portal '+tag,dialPrefix='Dialer '+tag
+  const prefix='Pagination '+tag,partPrefix='Payment '+tag,fullPrefix='Full payment '+tag,portalPrefix='Portal '+tag,dialPrefix='Dialer '+tag
   for(let i=0;i<35;i++)await db.lead.create({data:{uniqueId:'UI-PAGE-'+tag+'-'+i,name:prefix+' '+String(i).padStart(3,'0'),mobileNumber:'9899000000',webinarId:webinar.id,webinarName:webinar.name,paymentStatus:'NO_PAYMENT',state:'PageState '+tag,assignments:{create:{userId:actors.sales.id,stage:'FRESH_LOG'}}}})
   await db.lead.createMany({data:Array.from({length:65},(_,i)=>({uniqueId:'UI-PAID-'+tag+'-'+i,name:partPrefix+' '+String(i).padStart(3,'0'),mobileNumber:'9899000001',webinarId:webinar.id,webinarName:webinar.name,paymentStatus:'PART_PAYMENT',totalPayment:4000,partPaymentAmount:4000,state:partPrefix}))})
+  await db.lead.createMany({data:Array.from({length:65},(_,i)=>({uniqueId:'UI-FULL-'+tag+'-'+i,name:fullPrefix+' '+String(i).padStart(3,'0'),mobileNumber:'9899000004',webinarId:webinar.id,webinarName:webinar.name,paymentStatus:'FULL_PAYMENT',totalPayment:15999,fullPaymentAmount:15999,state:fullPrefix}))})
   await db.orgModule.update({where:{id:portal.id},data:{columnsConfig:JSON.stringify([{id:'topic',name:'Topic',type:'TEXT'},{id:'notes',name:'Notes',type:'TEXT'}])}})
   await db.lead.createMany({data:Array.from({length:65},(_,i)=>({uniqueId:'UI-PORTAL-'+tag+'-'+i,name:portalPrefix+' '+i,mobileNumber:'9899000002',paymentStatus:'NO_PAYMENT',currentModuleId:portal.id,customData:JSON.stringify({topic:portalPrefix+' '+String(i).padStart(3,'0')})}))})
   const dialer=await db.lead.create({data:{uniqueId:'UI-DIALER-'+tag,name:dialPrefix,mobileNumber:'9899000003',paymentStatus:'NO_PAYMENT',currentModuleId:'EXTRA_DIALER',remark1:dialPrefix,assignments:{create:{userId:actors.sales.id,stage:'EXTRA_DIALER'}}}})
   await db.callRecord.createMany({data:Array.from({length:65},(_,i)=>({leadId:dialer.id,userId:actors.sales.id,smartfloRefId:'UI-CALL-'+tag+'-'+i,duration:0,createdAt:new Date(Date.now()-i*1000)}))})
-  return {prefix,partPrefix,portalPrefix,dialPrefix,tag,dialer}
+  return {prefix,partPrefix,fullPrefix,portalPrefix,dialPrefix,tag,dialer}
 }
 exports.check=async function({browser,db,actors,webinar,portal,department,fixture,results,errors}){
   async function contextFor(actor){const context=await browser.newContext();await context.addCookies([{name:'vscrm_session',value:actor.token,url:'http://127.0.0.1:4319'}]);const page=await context.newPage();page.on('pageerror',e=>errors.push(new URL(page.url()).pathname+': '+e.message));return{context,page}}
@@ -44,10 +45,32 @@ exports.check=async function({browser,db,actors,webinar,portal,department,fixtur
     results.push('browser bulk assignment preserves six selected records across pages: PASS')
     await goto(p,'/part-payment')
     await p.locator('select').filter({has:p.locator('option').filter({hasText:fixture.partPrefix})}).selectOption(fixture.partPrefix)
-    await expect(matching(p,fixture.partPrefix)).toHaveCount(50)
-    await more(p);await expect(matching(p,fixture.partPrefix)).toHaveCount(65)
+    await expect(matching(p,fixture.partPrefix)).toHaveCount(15)
+    const firstPayment=await matching(p,fixture.partPrefix).first().innerText()
+    await p.getByRole('button',{name:'Next →',exact:true}).click()
+    await expect(matching(p,fixture.partPrefix)).toHaveCount(15)
+    await expect(matching(p,fixture.partPrefix).first()).not.toHaveText(firstPayment)
+    await p.getByRole('button',{name:'5',exact:true}).click()
+    await expect(matching(p,fixture.partPrefix)).toHaveCount(5)
     await exportRows(p,fixture.partPrefix,65)
-    results.push('payment table scrolls through server pages and exports all 65 matches: PASS')
+    results.push('payment table pages 15 rows at a time and exports all 65 matches from the last page: PASS')
+    await p.getByPlaceholder('Search by ID, Name, Mobile, Email...').fill(fixture.partPrefix+' 064')
+    await expect(matching(p,fixture.partPrefix)).toHaveCount(1)
+    await matching(p,fixture.partPrefix).getByTitle('Edit Lead',{exact:true}).click()
+    await p.getByPlaceholder('e.g. John Doe').fill(fixture.partPrefix+' 064 edited')
+    await p.locator('form input[type=number]').fill('4500')
+    await p.getByRole('button',{name:'Save Changes',exact:true}).click()
+    await p.getByText('Changes saved',{exact:true}).waitFor()
+    const edited=await db.lead.findUniqueOrThrow({where:{uniqueId:'UI-PAID-'+fixture.tag+'-64'}})
+    assert.equal(edited.name,fixture.partPrefix+' 064 edited');assert.equal(edited.partPaymentAmount,4500);assert.equal(edited.totalPayment,4500)
+    results.push('part-payment off-page search and lead edits persist names and amounts: PASS')
+    await goto(p,'/full-payment')
+    await p.locator('select').filter({has:p.locator('option').filter({hasText:fixture.fullPrefix})}).selectOption(fixture.fullPrefix)
+    await expect(matching(p,fixture.fullPrefix)).toHaveCount(15)
+    await p.getByRole('button',{name:'5',exact:true}).click()
+    await expect(matching(p,fixture.fullPrefix)).toHaveCount(5)
+    await exportRows(p,fixture.fullPrefix,65)
+    results.push('full-payment pagination and CSV exports retain all 65 matches: PASS')
     await goto(p,'/reports')
     await expect(p.getByRole('row').filter({hasText:actors.sales.name})).toContainText('₹10,01,000')
     results.push('sales report retains fixture revenue after typing and effect cleanup: PASS')

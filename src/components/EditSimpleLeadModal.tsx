@@ -128,7 +128,7 @@ export default function EditSimpleLeadModal({
       return;
     }
     const numAmount = Number(amount);
-    if (isNaN(numAmount) || numAmount < 0) {
+    if (!Number.isFinite(numAmount) || numAmount < 0) {
       toast.error('Please enter a valid payment amount');
       return;
     }

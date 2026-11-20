@@ -8,7 +8,7 @@ PieChart,Pie,Cell,BarChart,Bar,Legend
 } from 'recharts'
 import {
 Calendar,ChevronDown,Video,CheckCircle2,Clock,
-ExternalLink,Trophy,AlertCircle,Send,RotateCcw,RefreshCw,
+Trophy,AlertCircle,Send,RotateCcw,
 Palette,Layout,Film,ClipboardList,Zap,Sparkles,Layers
 } from 'lucide-react'
 import DatePicker from 'react-datepicker'
@@ -329,7 +329,6 @@ export default function SocialMediaPerformanceDashboard({
   const scheduled = filteredContent.filter((c) => c.uploadingStatus === 'Scheduled').length;
   const isPostingTeam = user.department === 'Posting Team' || filterTeam === 'Posting Team';
   const isGraphicsUser = user.department === 'Graphics Team' || user.department === 'Graphics' || user.department === 'Thumbnail Team' || (Boolean(user.department) && user.department.toLowerCase().includes('graphic'));
-  const isEditingUser = user.department === 'Editing Team' || user.department === 'Editing' || (Boolean(user.department) && user.department.toLowerCase().includes('edit'));
 
   const showGraphicsCards = filterTeam === 'Graphics Team' || (filterTeam === 'All' && isGraphicsUser && !user.isAdmin) || (user.isAdmin && filterTeam === 'All' && adminTab === 'graphics');
   const showEditingCards = !isPostingTeam && !showGraphicsCards;
