@@ -193,15 +193,11 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
   const recoveryConvertedLeads = useMemo(() => {
     return initialLeads.filter((l) => {
       if (!isLeadInDateRange(l, l.updateStatusDate || l.updatedAt)) return false;
-      const isCompletePayment = 
-        l.paymentStatus === 'FULL_PAYMENT' || 
+      if (l.leadStatus === 'IN_PROGRESS') return false;
+      const isFullPaymentClose = 
         l.leadStatus === 'CLOSED_FULL_PAYMENT' || 
-        (l.fullPaymentAmount !== null && l.fullPaymentAmount !== undefined && l.fullPaymentAmount > 0) ||
-        (l.totalPayment !== null && l.totalPayment !== undefined && l.totalPayment >= 15999);
-      const hasRecovered = 
-        (l.recoveryAmount !== null && l.recoveryAmount !== undefined && l.recoveryAmount > 0) ||
-        ((l.totalPayment || 0) > (l.partPaymentAmount || 0));
-      return isCompletePayment || hasRecovered;
+        (l.leadStatus?.startsWith('CLOSED') && (l.paymentStatus === 'FULL_PAYMENT' || (l.fullPaymentAmount !== null && l.fullPaymentAmount !== undefined && l.fullPaymentAmount > 0) || (l.totalPayment !== null && l.totalPayment !== undefined && l.totalPayment >= 15999)));
+      return isFullPaymentClose;
     }).length;
   }, [initialLeads, isLeadInDateRange]);
 
@@ -332,7 +328,11 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
         if (l.leadStatus?.startsWith('CLOSED') || l.fullPaymentAmount > 0) map[exec.id].closed++;
         const isPaid = l.leadStatus === 'CLOSED_FULL_PAYMENT' || l.paymentStatus === 'FULL_PAYMENT' || l.fullPaymentAmount > 0;
         if (isPaid) map[exec.id].paidClosed = (map[exec.id].paidClosed || 0) + 1;
-        const isConverted = (l.totalPayment || 0) >= 1000;
+        const isRecoveryConversion = l.leadStatus !== 'IN_PROGRESS' && (
+          l.leadStatus === 'CLOSED_FULL_PAYMENT' || 
+          (l.leadStatus?.startsWith('CLOSED') && (l.paymentStatus === 'FULL_PAYMENT' || (l.fullPaymentAmount || 0) > 0 || (l.totalPayment || 0) >= 15999))
+        );
+        const isConverted = exec.department === 'RECOVERY' ? isRecoveryConversion : ((l.totalPayment || 0) >= 1000);
         if (isConverted) map[exec.id].converted = (map[exec.id].converted || 0) + 1;
         map[exec.id].revenue += (l.leadStatus?.startsWith('CLOSED') ? 0 : (l.totalPayment || l.salesAmount || 0));
         map[exec.id].recovery += (l.recoveryAmount || 0);
@@ -1273,7 +1273,7 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
                 <div className="dept-perf-stat-label">Conversion</div>
                 <div className="dept-perf-stat-val">
                   {filteredLeads.filter((l) => l.assignments?.[0]?.user?.department === 'RECOVERY').length > 0 ? 
-                    ((initialLeads.filter((l) => l.assignments?.[0]?.user?.department === 'RECOVERY' && (l.leadStatus === 'CLOSED_FULL_PAYMENT' || l.paymentStatus === 'FULL_PAYMENT' || l.fullPaymentAmount > 0) && isLeadInDateRange(l, l.updateStatusDate || l.updatedAt)).length / filteredLeads.filter((l) => l.assignments?.[0]?.user?.department === 'RECOVERY').length) * 100).toFixed(1) + '%' 
+                    ((initialLeads.filter((l) => l.assignments?.[0]?.user?.department === 'RECOVERY' && l.leadStatus !== 'IN_PROGRESS' && (l.leadStatus === 'CLOSED_FULL_PAYMENT' || (l.leadStatus?.startsWith('CLOSED') && (l.paymentStatus === 'FULL_PAYMENT' || (l.fullPaymentAmount || 0) > 0))) && isLeadInDateRange(l, l.updateStatusDate || l.updatedAt)).length / filteredLeads.filter((l) => l.assignments?.[0]?.user?.department === 'RECOVERY').length) * 100).toFixed(1) + '%' 
                     : '0%'}
                 </div>
               </div>
