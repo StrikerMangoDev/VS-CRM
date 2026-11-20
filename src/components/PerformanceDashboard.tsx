@@ -1,7 +1,7 @@
 'use client'
 import type { LeadMetrics,DashboardUser,TopPerformer,IssueView,Person,DateButtonProps } from '@/lib/view-types'
 
-import { useState,useMemo,forwardRef,useCallback } from 'react'
+import { useState,useEffect,useMemo,forwardRef,useCallback } from 'react'
 import {
 XAxis,YAxis,CartesianGrid,Tooltip as RechartsTooltip,ResponsiveContainer,
 PieChart,Pie,Cell,BarChart,Bar,Legend
@@ -57,12 +57,31 @@ const MetricCard = ({ title, value, icon: Icon, color, trend, trendLabel }: {tit
     </div>
   )
 
-export default function PerformanceDashboard({ initialLeads = [], user, topPerformers = [], issues = [] }: {initialLeads?:LeadMetrics[];user:DashboardUser;topPerformers?:TopPerformer[];issues?:IssueView[]}) {
+export default function PerformanceDashboard({ 
+  initialLeads = [], 
+  user, 
+  topPerformers = [], 
+  issues = [],
+  defaultDepartment = ''
+}: {
+  initialLeads?: LeadMetrics[];
+  user: DashboardUser;
+  topPerformers?: TopPerformer[];
+  issues?: IssueView[];
+  defaultDepartment?: string;
+}) {
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null)
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null)
-  const [filterDepartment, setFilterDepartment] = useState('')
+  const [filterDepartment, setFilterDepartment] = useState(defaultDepartment || '')
   const [filterExecutive, setFilterExecutive] = useState('')
   const [filterWebinar, setFilterWebinar] = useState('')
+
+  // Sync defaultDepartment if it changes from parent tabs
+  useEffect(() => {
+    if (defaultDepartment) {
+      setFilterDepartment(defaultDepartment);
+    }
+  }, [defaultDepartment]);
 
   // Filter leads dynamically on client side
   const filteredLeads = useMemo(() => {
@@ -119,6 +138,14 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
   }).length;
   
   const convertedLeads = initialLeads.filter((l) => {
+    const isRecoveryLead = l.assignments?.[0]?.user?.department === 'RECOVERY';
+    if (isRecoveryLead) {
+      if (l.leadStatus === 'IN_PROGRESS') return false;
+      const isFullPaymentClose = 
+        l.leadStatus === 'CLOSED_FULL_PAYMENT' || 
+        (l.leadStatus?.startsWith('CLOSED') && (l.paymentStatus === 'FULL_PAYMENT' || (l.fullPaymentAmount !== null && l.fullPaymentAmount !== undefined && l.fullPaymentAmount > 0) || (l.totalPayment !== null && l.totalPayment !== undefined && l.totalPayment >= 15999)));
+      return isFullPaymentClose && isLeadInDateRange(l, l.updateStatusDate || l.updatedAt);
+    }
     const isConverted = (l.totalPayment || 0) >= 1000;
     if (!isConverted) return false;
     return isLeadInDateRange(l, l.updateStatusDate || l.updatedAt);
@@ -218,7 +245,7 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
     }).length;
   }, [initialLeads, isLeadInDateRange]);
 
-  const isRecovery = user.department === 'RECOVERY' || (user.isAdmin && filterDepartment === 'RECOVERY');
+  const isRecovery = user.department === 'RECOVERY' || filterDepartment === 'RECOVERY';
   
   const assignedLeads = filteredLeads.filter((l) => {
     const relevantAssignments = l.assignments ? l.assignments.filter((a) => a.user?.department !== 'TECHNICAL') : [];
@@ -521,8 +548,9 @@ export default function PerformanceDashboard({ initialLeads = [], user, topPerfo
             
             {user.isAdmin && (
               <>
-                <MetricCard title="Total Recovery" value={formatCurrency(totalRecovery)} icon={ShieldCheck} color={COLORS.secondary} trend={10.5} />
-                <MetricCard title="Pending Recovery" value={formatCurrency(pendingRecovery)} icon={AlertTriangle} color={COLORS.danger} trend={-2.1} />
+                <MetricCard title="Part Payment" value={formatCurrency(totalPartPayment)} icon={IndianRupee} color={COLORS.warning} trend={0} />
+                <MetricCard title="Recovered Amount" value={formatCurrency(totalRecovery)} icon={ShieldCheck} color={COLORS.secondary} trend={10.5} />
+                <MetricCard title="Recovery Rate" value={`${recoveryRate}%`} icon={TrendingUp} color={COLORS.success} trend={0.18} />
               </>
             )}
             

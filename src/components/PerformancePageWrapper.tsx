@@ -20,7 +20,7 @@ export default function PerformancePageWrapper({
   adCreativeData?: AdCreativeView[];
   user: DashboardUser;
 }) {
-  const [activeTab, setActiveTab] = useState<'SALES' | 'SOCIAL_MEDIA'>('SALES')
+  const [activeTab, setActiveTab] = useState<'SALES' | 'RECOVERY' | 'SOCIAL_MEDIA'>('SALES')
 
   const isSocialMediaUser = user.mainDepartment === 'Social Media' || user.department === 'Graphics Team' || user.department === 'Editing Team' || user.department === 'Posting Team' || (user.department && user.department.toLowerCase().includes('graphic'));
   
@@ -46,6 +46,22 @@ export default function PerformancePageWrapper({
             Sales Department
           </button>
           <button
+            onClick={() => setActiveTab('RECOVERY')}
+            style={{
+              background: activeTab === 'RECOVERY' ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+              color: activeTab === 'RECOVERY' ? '#3b82f6' : 'var(--text-muted)',
+              border: `1px solid ${activeTab === 'RECOVERY' ? 'rgba(59, 130, 246, 0.5)' : 'rgba(255,255,255,0.1)'}`,
+              padding: '8px 24px',
+              borderRadius: '8px',
+              fontSize: '0.95rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            Recovery Department
+          </button>
+          <button
             onClick={() => setActiveTab('SOCIAL_MEDIA')}
             style={{
               background: activeTab === 'SOCIAL_MEDIA' ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
@@ -64,7 +80,9 @@ export default function PerformancePageWrapper({
         </div>
 
         {activeTab === 'SALES' ? (
-          <PerformanceDashboard initialLeads={salesData} issues={issuesData} user={user} />
+          <PerformanceDashboard initialLeads={salesData} issues={issuesData} user={user} defaultDepartment="SALES" />
+        ) : activeTab === 'RECOVERY' ? (
+          <PerformanceDashboard initialLeads={salesData} issues={issuesData} user={user} defaultDepartment="RECOVERY" />
         ) : (
           <SocialMediaPerformanceDashboard initialContent={socialMediaData} initialTasks={taskData} initialAdCreatives={adCreativeData} user={user} />
         )}
