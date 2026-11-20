@@ -174,6 +174,10 @@ export default function EditLeadModal({
     let savedLead: Awaited<ReturnType<typeof updateLeadCompleteAction>>
     
     try {
+      const enteredAmounts = (Number(formData.amount1) || 0) + (Number(formData.amount2) || 0) + (Number(formData.amount3) || 0);
+      const prevOtherDeptAmount = updaterDepartment === 'RECOVERY' ? (lead.salesAmount || 0) : (updaterDepartment === 'SALES' ? (lead.recoveryAmount || 0) : 0);
+      const calculatedTotal = (lead.partPaymentAmount || 0) + (lead.fullPaymentAmount || 0) + prevOtherDeptAmount + enteredAmounts;
+
       const payload: Parameters<typeof updateLeadCompleteAction>[1] = {
         callStatus: formData.callStatus,
         nextFollowUpDate: formData.nextFollowUpDate ? new Date(formData.nextFollowUpDate) : null,
@@ -183,7 +187,7 @@ export default function EditLeadModal({
         amount2: formData.amount2 ? Number(formData.amount2) : null,
         amount3: formData.amount3 ? Number(formData.amount3) : null,
         discount: formData.discount ? Number(formData.discount) : null,
-        totalPayment: (lead.partPaymentAmount || 0) + (lead.fullPaymentAmount || 0) + (Number(formData.amount1) || 0) + (Number(formData.amount2) || 0) + (Number(formData.amount3) || 0),
+        totalPayment: calculatedTotal,
         updaterDepartment,
         leadStatus: formData.leadStatus,
         whatsappTemplate: selectedTemplateName || null

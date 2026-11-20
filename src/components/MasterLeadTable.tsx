@@ -432,6 +432,45 @@ function MasterLeadTable({
     });
 
     const rows = exportLeads.map(lead => {
+      const partPay = Number(lead.partPaymentAmount) || 0;
+      const fullPay = Number(lead.fullPaymentAmount) || 0;
+      const enteredSum = (Number(lead.amount1) || 0) + (Number(lead.amount2) || 0) + (Number(lead.amount3) || 0);
+      const isRecovery = lead.assignments && lead.assignments.some((a) => a.user.department === 'RECOVERY');
+      const isSales = lead.assignments && lead.assignments.some((a) => a.user.department === 'SALES');
+
+      let recAmt = Number(lead.recoveryAmount) || 0;
+      let salesAmt = Number(lead.salesAmount) || 0;
+
+      if (isRecovery) {
+        // Recovery revenue NEVER includes the initial part payment
+        if (enteredSum > 0) {
+          recAmt = enteredSum;
+        } else if (recAmt >= (Number(lead.totalPayment) || 0) && partPay > 0) {
+          recAmt = Math.max(0, recAmt - partPay);
+        }
+        if (!isSales) {
+          salesAmt = 0;
+        }
+      } else if (isSales) {
+        if (partPay > 0 || fullPay > 0) {
+          salesAmt = enteredSum;
+        }
+        recAmt = 0;
+      } else {
+        // Unassigned
+        if (partPay > 0) {
+          recAmt = enteredSum;
+          salesAmt = 0;
+        } else if (fullPay > 0) {
+          recAmt = 0;
+          salesAmt = 0;
+        } else {
+          recAmt = 0;
+        }
+      }
+
+      const totalPaid = Math.max(Number(lead.totalPayment) || 0, partPay + fullPay + salesAmt + recAmt);
+
       const row = [
         lead.uniqueId,
         lead.name,
@@ -443,12 +482,12 @@ function MasterLeadTable({
         lead.remark1 || '-',
         lead.remark2 || '-',
         lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString('en-GB') : '-',
-        lead.partPaymentAmount.toString(),
-        lead.fullPaymentAmount.toString(),
+        partPay.toString(),
+        fullPay.toString(),
         (lead.discount || 0).toString(),
-        (lead.salesAmount || 0).toString(),
-        (lead.recoveryAmount || 0).toString(),
-        lead.totalPayment.toString(),
+        salesAmt.toString(),
+        recAmt.toString(),
+        totalPaid.toString(),
         lead.whatsappJoined ? 'JOINED' : 'PENDING',
         lead.assignments && lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').length > 0
           ? lead.assignments.filter((a) => a.user.department !== 'TECHNICAL').map((a) => `${a.user.name} (${a.user.department})`).join('; ')

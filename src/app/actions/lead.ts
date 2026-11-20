@@ -490,36 +490,55 @@ export async function updateLeadAmountsAction(leadId: string, amount1: number | 
   const actor = await requireLeadAccess(leadId);
   if (actor.role === 'EXEC' && updaterDepartment && updaterDepartment !== actor.department) throw new Error('Forbidden');
   if ([amount1, amount2, amount3, discount, totalPayment].some(n => n != null && (!Number.isFinite(n) || n < 0))) throw new Error('Invalid amount');
+
+  const existingLead = await prisma.lead.findUnique({ 
+    where: { id: leadId },
+    include: { assignments: { include: { user: true } } }
+  });
+  if (!existingLead) throw new Error('Lead not found');
+
+  const enteredAmounts = (Number(amount1) || 0) + (Number(amount2) || 0) + (Number(amount3) || 0);
+  let dept = updaterDepartment;
+  if (!dept || dept === 'ADMIN' || dept === 'TL') {
+    const hasRecoveryAssignee = existingLead.assignments?.some((a: any) => a.user?.department === 'RECOVERY');
+    const hasSalesAssignee = existingLead.assignments?.some((a: any) => a.user?.department === 'SALES');
+    if (hasRecoveryAssignee) dept = 'RECOVERY';
+    else if (hasSalesAssignee) dept = 'SALES';
+    else if ((existingLead.partPaymentAmount || 0) > 0) dept = 'RECOVERY';
+    else dept = 'SALES';
+  }
+
   const dataToUpdate: import('@prisma/client').Prisma.LeadUncheckedUpdateInput = {
     amount1,
     amount2,
     amount3,
     discount,
-    totalPayment,
     nextFollowUpDate,
     remark1,
     remark2
   }
 
-  const existingLead = await prisma.lead.findUnique({ where: { id: leadId } });
-  if (existingLead && existingLead.totalPayment !== totalPayment) {
+  if (dept === 'RECOVERY') {
+    dataToUpdate.recoveryAmount = enteredAmounts;
+    dataToUpdate.totalPayment = (existingLead.partPaymentAmount || 0) + (existingLead.fullPaymentAmount || 0) + (existingLead.salesAmount || 0) + enteredAmounts;
+  } else if (dept === 'SALES') {
+    dataToUpdate.salesAmount = enteredAmounts;
+    dataToUpdate.totalPayment = (existingLead.partPaymentAmount || 0) + (existingLead.fullPaymentAmount || 0) + enteredAmounts + (existingLead.recoveryAmount || 0);
+  } else {
+    dataToUpdate.totalPayment = (existingLead.partPaymentAmount || 0) + (existingLead.fullPaymentAmount || 0) + enteredAmounts;
+  }
+
+  if (existingLead.totalPayment !== dataToUpdate.totalPayment) {
     dataToUpdate.updateStatusDate = new Date();
   }
-  if (existingLead && ((existingLead.partPaymentAmount || 0) + totalPayment + (discount || 0)) >= 15999) {
+  const finalTotal = dataToUpdate.totalPayment as number;
+  if (finalTotal + (discount || 0) >= 15999) {
     if (!existingLead.frozenLeadStatus) {
       dataToUpdate.frozenLeadStatus = calculateLeadStatus(existingLead.paymentDate, null);
     }
     if (!existingLead.frozenLeadLogStatus) {
       dataToUpdate.frozenLeadLogStatus = calculateLeadLogStatus(existingLead.recoveryAssignedAt);
     }
-  }
-
-  // Route amounts exactly as requested by user.
-  // Never touch partPaymentAmount or fullPaymentAmount.
-  if (updaterDepartment === 'SALES') {
-    dataToUpdate.salesAmount = totalPayment;
-  } else if (updaterDepartment === 'RECOVERY') {
-    dataToUpdate.recoveryAmount = totalPayment;
   }
   
   const changes = []
@@ -1116,7 +1135,10 @@ export async function updateLeadCompleteAction(
   await requireLeadAccess(leadId, false);
 
   const actor = await requireLeadAccess(leadId);
-  const existingLead = await prisma.lead.findUnique({ where: { id: leadId } })
+  const existingLead = await prisma.lead.findUnique({ 
+    where: { id: leadId },
+    include: { assignments: { include: { user: true } } }
+  })
   if (!existingLead) throw new Error('Lead not found')
 
   if (actor.role === 'EXEC') {
@@ -1161,20 +1183,56 @@ export async function updateLeadCompleteAction(
   }
 
   // Payment Logic
-  if (data.totalPayment !== undefined) {
-    dataToUpdate.totalPayment = data.totalPayment
-    if (existingLead.totalPayment !== data.totalPayment) {
-      dataToUpdate.updateStatusDate = new Date()
-    }
-    
-    if (((existingLead.partPaymentAmount || 0) + data.totalPayment + (data.discount || 0)) >= 15999 && !existingLead.frozenLeadStatus) {
-      dataToUpdate.frozenLeadStatus = calculateLeadStatus(existingLead.paymentDate, null)
-    }
+  const newAmount1 = data.amount1 !== undefined ? (Number(data.amount1) || 0) : (existingLead.amount1 || 0);
+  const newAmount2 = data.amount2 !== undefined ? (Number(data.amount2) || 0) : (existingLead.amount2 || 0);
+  const newAmount3 = data.amount3 !== undefined ? (Number(data.amount3) || 0) : (existingLead.amount3 || 0);
+  const enteredAmounts = newAmount1 + newAmount2 + newAmount3;
+  const isAmountsEdited = data.amount1 !== undefined || data.amount2 !== undefined || data.amount3 !== undefined;
 
-    if (data.updaterDepartment === 'SALES') {
-      dataToUpdate.salesAmount = data.totalPayment
-    } else if (data.updaterDepartment === 'RECOVERY') {
-      dataToUpdate.recoveryAmount = data.totalPayment
+  let dept = data.updaterDepartment;
+  if (!dept || dept === 'ADMIN' || dept === 'TL') {
+    const hasRecoveryAssignee = existingLead.assignments?.some(a => a.user.department === 'RECOVERY');
+    const hasSalesAssignee = existingLead.assignments?.some(a => a.user.department === 'SALES');
+    if (hasRecoveryAssignee) dept = 'RECOVERY';
+    else if (hasSalesAssignee) dept = 'SALES';
+    else if ((existingLead.partPaymentAmount || 0) > 0) dept = 'RECOVERY';
+    else dept = 'SALES';
+  }
+
+  if (dept === 'RECOVERY') {
+    if (isAmountsEdited) {
+      dataToUpdate.recoveryAmount = enteredAmounts;
+    } else if ((existingLead.recoveryAmount || 0) > 0 && enteredAmounts === 0 && (existingLead.partPaymentAmount || 0) > 0 && (existingLead.recoveryAmount || 0) === existingLead.totalPayment) {
+      // Fix historical bug where recoveryAmount was erroneously set to totalPayment
+      dataToUpdate.recoveryAmount = 0;
+    }
+    const currentRecovery = dataToUpdate.recoveryAmount !== undefined ? (dataToUpdate.recoveryAmount as number) : (existingLead.recoveryAmount || 0);
+    const newTotal = (existingLead.partPaymentAmount || 0) + (existingLead.fullPaymentAmount || 0) + (existingLead.salesAmount || 0) + currentRecovery;
+    dataToUpdate.totalPayment = newTotal;
+  } else if (dept === 'SALES') {
+    if (isAmountsEdited) {
+      dataToUpdate.salesAmount = enteredAmounts;
+    }
+    const currentSales = dataToUpdate.salesAmount !== undefined ? (dataToUpdate.salesAmount as number) : (existingLead.salesAmount || 0);
+    const newTotal = (existingLead.partPaymentAmount || 0) + (existingLead.fullPaymentAmount || 0) + currentSales + (existingLead.recoveryAmount || 0);
+    dataToUpdate.totalPayment = newTotal;
+  } else {
+    if (data.totalPayment !== undefined) {
+      dataToUpdate.totalPayment = data.totalPayment;
+    }
+  }
+
+  if (dataToUpdate.totalPayment !== undefined && existingLead.totalPayment !== dataToUpdate.totalPayment) {
+    dataToUpdate.updateStatusDate = new Date();
+  }
+  
+  const finalTotal = dataToUpdate.totalPayment !== undefined ? (dataToUpdate.totalPayment as number) : existingLead.totalPayment;
+  if (finalTotal + (data.discount !== undefined ? (Number(data.discount) || 0) : (existingLead.discount || 0)) >= 15999) {
+    if (!existingLead.frozenLeadStatus) {
+      dataToUpdate.frozenLeadStatus = calculateLeadStatus(existingLead.paymentDate, null);
+    }
+    if (!existingLead.frozenLeadLogStatus) {
+      dataToUpdate.frozenLeadLogStatus = calculateLeadLogStatus(existingLead.recoveryAssignedAt);
     }
   }
 
