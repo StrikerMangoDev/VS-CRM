@@ -1,9 +1,9 @@
 'use client'
-import { useInfiniteLeadPage,allMatchingLeads,dateBounds } from '@/hooks/use-lead-page'
+import { useLeadPage,usePageNumber,allMatchingLeads,dateBounds } from '@/hooks/use-lead-page'
 import { getLeadSelection } from '@/app/actions/lead-query'
 import type { LeadPage,LeadQuery } from '@/lib/lead-query'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import AddColumnModal from '@/components/AddColumnModal'
@@ -65,22 +65,27 @@ export default function SimpleLeadTable({
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null)
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null)
 
+  const [pageSize, setPageSize] = useState(15)
   const [filterNow] = useState(()=>new Date())
-  const query:LeadQuery={
-    sheet:sheetName==='PART_PAYMENT'?'PART_PAYMENT':'FULL_PAYMENT',
-    search:searchQuery.trim() || undefined,
-    webinar:filterWebinar,
-    state:filterState,
-    ...dateBounds(filterDateRange,filterStartDate,filterEndDate,filterNow),
-    size:50
+  const queryFilters: LeadQuery = {
+    sheet: sheetName === 'PART_PAYMENT' ? 'PART_PAYMENT' : 'FULL_PAYMENT',
+    search: searchQuery.trim() || undefined,
+    webinar: filterWebinar,
+    state: filterState,
+    ...dateBounds(filterDateRange, filterStartDate, filterEndDate, filterNow),
   }
-  const [pageData,sentinel]=useInfiniteLeadPage(initialPage,query)
-  const leads=pageData.rows
+  const [requestedPage, setRequestedPage] = usePageNumber(JSON.stringify({ ...queryFilters, size: pageSize }))
+  const query = { ...queryFilters, page: requestedPage, size: pageSize }
+  const { rows: leads, setRows, ...pageData } = useLeadPage(initialPage, query)
+  const totalPages = Math.ceil(pageData.total / pageSize)
+  const currentPage = Math.min(requestedPage, Math.max(1, totalPages))
+  const setCurrentPage = (next: number | ((page: number) => number)) => setRequestedPage(typeof next === 'function' ? next(currentPage) : next)
+
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set())
 
   const handleSelectAll = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const checked=e.target.checked
-    const ids=await getLeadSelection(query)
+    const ids=await getLeadSelection(queryFilters)
     if (checked) {
       const newSelected = new Set(selectedLeads)
       ids.forEach(id => newSelected.add(id))
@@ -102,7 +107,7 @@ export default function SimpleLeadTable({
   const displayedLeads = leads.map(l => overrides[l.id] ? { ...l, ...overrides[l.id] } : l)
 
   const exportToCSV = async () => {
-    const exportLeads = await allMatchingLeads(query)
+    const exportLeads = await allMatchingLeads(queryFilters)
     const headers = [
       'Lead ID',
       'Name',
@@ -403,9 +408,72 @@ export default function SimpleLeadTable({
                 </td>
               </tr>
             )}
-            <tr ref={sentinel} aria-hidden="true" style={{ height: 0 }} />
           </tbody>
         </table>
+      </div>
+
+      {/* Pagination Controls */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', background: 'var(--card-bg)', borderTop: '1px solid var(--card-border)', borderBottomLeftRadius: '10px', borderBottomRightRadius: '10px', flexShrink: 0, marginTop: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            Showing {pageData.total === 0 ? 0 : ((currentPage - 1) * pageSize) + 1}–{Math.min(currentPage * pageSize, pageData.total)} of {pageData.total} leads
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            Rows per page:
+            <select 
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              style={{
+                background: 'var(--table-hover)', color: 'var(--foreground)', border: '1px solid var(--card-border)', outline: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', fontSize: '0.85rem'
+              }}
+            >
+              <option value={15} style={{ background: 'var(--background)' }}>15</option>
+              <option value={25} style={{ background: 'var(--background)' }}>25</option>
+              <option value={50} style={{ background: 'var(--background)' }}>50</option>
+              <option value={100} style={{ background: 'var(--background)' }}>100</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button 
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            style={{ background: 'transparent', border: '1px solid var(--card-border)', color: currentPage === 1 ? '#475569' : 'var(--text-muted)', padding: '6px 12px', borderRadius: '6px', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontSize: '0.85rem' }}
+          >
+            ← Previous
+          </button>
+          
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(page => page === 1 || page === totalPages || Math.abs(currentPage - page) <= 1 || (currentPage === 1 && page <= 3) || (currentPage === totalPages && page >= totalPages - 2))
+            .map((page, index, array) => (
+              <React.Fragment key={page}>
+                {index > 0 && array[index - 1] !== page - 1 && <span style={{ color: 'var(--text-muted)' }}>...</span>}
+                <button
+                  onClick={() => setCurrentPage(page)}
+                  style={{ 
+                    background: currentPage === page ? '#3b82f6' : 'transparent',
+                    color: currentPage === page ? 'var(--text-primary)' : 'var(--text-muted)',
+                    border: currentPage === page ? '1px solid #3b82f6' : '1px solid var(--card-border)',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                    fontWeight: currentPage === page ? 600 : 400
+                  }}
+                >
+                  {page}
+                </button>
+              </React.Fragment>
+            ))}
+          
+          <button 
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages || totalPages === 0}
+            style={{ background: 'transparent', border: '1px solid var(--card-border)', color: (currentPage === totalPages || totalPages === 0) ? '#475569' : 'var(--text-muted)', padding: '6px 12px', borderRadius: '6px', cursor: (currentPage === totalPages || totalPages === 0) ? 'not-allowed' : 'pointer', fontSize: '0.85rem' }}
+          >
+            Next →
+          </button>
+        </div>
       </div>
 
       {editingLead && (

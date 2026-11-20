@@ -27,7 +27,7 @@ export default async function FullPaymentSheet() {
     redirect('/sales/issues');
   }
 
-  const initialPage=await getLeadPage({sheet:'FULL_PAYMENT',size:50})
+  const initialPage=await getLeadPage({sheet:'FULL_PAYMENT',size:15})
 
   const customColumns = await prisma.customColumn.findMany({
     where: { departmentTarget: 'FULL_PAYMENT' }
