@@ -168,19 +168,55 @@ export async function editTeamMemberAction(formData: FormData) {
   });
 }
 
-export async function getLeadsCountByStatusAction(fromUserId: string, callStatus: string, webinar?: string) {
+export async function getLeadsCountByStatusAction(fromUserId: string, callStatus?: string, webinar?: string, leadStatus?: string) {
   await requireTeamAccess(fromUserId);
 
   try {
-    const leadCondition: import('@prisma/client').Prisma.LeadWhereInput = {
-      callStatus: callStatus
-    };
-    if (webinar && webinar.trim() !== '') {
-      leadCondition.OR = [
-        { webinarId: webinar },
-        { webinarName: webinar }
-      ];
+    const andConditions: import('@prisma/client').Prisma.LeadWhereInput[] = [];
+
+    if (callStatus && callStatus.trim() !== '') {
+      andConditions.push({ callStatus: callStatus });
     }
+
+    if (webinar && webinar.trim() !== '') {
+      andConditions.push({
+        OR: [
+          { webinarId: webinar },
+          { webinarName: webinar }
+        ]
+      });
+    }
+
+    if (leadStatus && leadStatus !== 'all' && leadStatus.trim() !== '') {
+      if (leadStatus === 'IN_PROGRESS' || leadStatus.toLowerCase() === 'in progress' || leadStatus === 'ACTIVE') {
+        andConditions.push({
+          NOT: [
+            { leadStatus: { startsWith: 'CLOSED' } },
+            { isTransferred: true }
+          ]
+        });
+      } else if (leadStatus === 'CLOSED' || leadStatus.toLowerCase() === 'closed') {
+        andConditions.push({
+          OR: [
+            { leadStatus: { startsWith: 'CLOSED' } },
+            { isTransferred: true }
+          ]
+        });
+      } else if (leadStatus === 'CLOSED_FULL_PAYMENT' || leadStatus.toLowerCase().includes('full payment')) {
+        andConditions.push({
+          OR: [
+            { leadStatus: 'CLOSED_FULL_PAYMENT' },
+            { leadStatus: { contains: 'full payment', mode: 'insensitive' } }
+          ]
+        });
+      } else {
+        andConditions.push({
+          leadStatus: { equals: leadStatus, mode: 'insensitive' }
+        });
+      }
+    }
+
+    const leadCondition: import('@prisma/client').Prisma.LeadWhereInput = andConditions.length > 0 ? { AND: andConditions } : {};
 
     const count = await prisma.assignment.count({
       where: {
@@ -194,7 +230,7 @@ export async function getLeadsCountByStatusAction(fromUserId: string, callStatus
   }
 }
 
-export async function transferLeadsBulkAction(fromUserId: string, toUserId: string, callStatus: string, count: number, webinar?: string) {
+export async function transferLeadsBulkAction(fromUserId: string, toUserId: string, callStatus: string, count: number, webinar?: string, leadStatus?: string) {
   return withLeadTransaction(async () => {
 
   await requireTeamAccess(fromUserId); await requireTeamAccess(toUserId);
@@ -204,15 +240,51 @@ export async function transferLeadsBulkAction(fromUserId: string, toUserId: stri
   }
 
   try {
-    const leadCondition: import('@prisma/client').Prisma.LeadWhereInput = {
-      callStatus: callStatus
-    };
-    if (webinar && webinar.trim() !== '') {
-      leadCondition.OR = [
-        { webinarId: webinar },
-        { webinarName: webinar }
-      ];
+    const andConditions: import('@prisma/client').Prisma.LeadWhereInput[] = [];
+
+    if (callStatus && callStatus.trim() !== '') {
+      andConditions.push({ callStatus: callStatus });
     }
+
+    if (webinar && webinar.trim() !== '') {
+      andConditions.push({
+        OR: [
+          { webinarId: webinar },
+          { webinarName: webinar }
+        ]
+      });
+    }
+
+    if (leadStatus && leadStatus !== 'all' && leadStatus.trim() !== '') {
+      if (leadStatus === 'IN_PROGRESS' || leadStatus.toLowerCase() === 'in progress' || leadStatus === 'ACTIVE') {
+        andConditions.push({
+          NOT: [
+            { leadStatus: { startsWith: 'CLOSED' } },
+            { isTransferred: true }
+          ]
+        });
+      } else if (leadStatus === 'CLOSED' || leadStatus.toLowerCase() === 'closed') {
+        andConditions.push({
+          OR: [
+            { leadStatus: { startsWith: 'CLOSED' } },
+            { isTransferred: true }
+          ]
+        });
+      } else if (leadStatus === 'CLOSED_FULL_PAYMENT' || leadStatus.toLowerCase().includes('full payment')) {
+        andConditions.push({
+          OR: [
+            { leadStatus: 'CLOSED_FULL_PAYMENT' },
+            { leadStatus: { contains: 'full payment', mode: 'insensitive' } }
+          ]
+        });
+      } else {
+        andConditions.push({
+          leadStatus: { equals: leadStatus, mode: 'insensitive' }
+        });
+      }
+    }
+
+    const leadCondition: import('@prisma/client').Prisma.LeadWhereInput = andConditions.length > 0 ? { AND: andConditions } : {};
 
     // Find up to `count` assignments matching the criteria
     const assignmentsToTransfer = await prisma.assignment.findMany({

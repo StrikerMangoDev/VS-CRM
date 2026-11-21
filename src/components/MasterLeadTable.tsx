@@ -224,19 +224,31 @@ function MasterLeadTable({
   const [isBulkTransferModalOpen, setIsBulkTransferModalOpen] = useState(false)
   const [transferFromUser, setTransferFromUser] = useState('')
   const [transferCallStatus, setTransferCallStatus] = useState('')
+  const [transferLeadStatus, setTransferLeadStatus] = useState('')
   const [transferWebinar, setTransferWebinar] = useState('')
   const [transferCount, setTransferCount] = useState<number | ''>('')
   const [transferToUser, setTransferToUser] = useState('')
-  const transferKey=JSON.stringify([transferFromUser,transferCallStatus,transferWebinar])
-  const [countResult,setCountResult]=useState<{key:string;count:number}|null>(null)
-  const isFetchingCount=Boolean(transferFromUser&&transferCallStatus&&countResult?.key!==transferKey)
-  const availableLeadsCount=transferFromUser&&transferCallStatus&&countResult?.key===transferKey?countResult.count:null
+  const transferKey = JSON.stringify([transferFromUser, transferCallStatus, transferWebinar, transferLeadStatus])
+  const [countResult, setCountResult] = useState<{key:string;count:number}|null>(null)
+  const isFetchingCount = Boolean(transferFromUser && countResult?.key !== transferKey)
+  const availableLeadsCount = transferFromUser && countResult?.key === transferKey ? countResult.count : null
   const [isTransferring, setIsTransferring] = useState(false)
 
-  useEffect(()=>{if(!transferFromUser||!transferCallStatus)return;let active=true;
-    getLeadsCountByStatusAction(transferFromUser,transferCallStatus,transferWebinar).then(res=>{if(active)setCountResult({key:transferKey,count:res.count??0})}).catch(()=>{if(active){setCountResult({key:transferKey,count:0});toast.error('Unable to count leads')}})
-    return()=>{active=false}
-  },[transferFromUser,transferCallStatus,transferWebinar,transferKey])
+  useEffect(() => {
+    if (!transferFromUser) return;
+    let active = true;
+    getLeadsCountByStatusAction(transferFromUser, transferCallStatus, transferWebinar, transferLeadStatus)
+      .then(res => {
+        if (active) setCountResult({ key: transferKey, count: res.count ?? 0 })
+      })
+      .catch(() => {
+        if (active) {
+          setCountResult({ key: transferKey, count: 0 });
+          toast.error('Unable to count leads');
+        }
+      });
+    return () => { active = false };
+  }, [transferFromUser, transferCallStatus, transferWebinar, transferLeadStatus, transferKey])
 
   const [filterNow] = useState(() => new Date())
   const queryFilters: LeadQuery = { sheet: sheetName === 'EXTRA_DIALER' ? 'EXTRA_DIALER' : 'MASTER', search: searchQuery, webinar: filterWebinar, payment: filterPaymentStatus, call: filterCallStatus, leadStatus: filterLeadStatus, log: filterLogStatus, state: filterState, whatsapp: filterWhatsapp, team: filterTeam, executive: filterExecutive, ...dateBounds(filterDateRange,filterStartDate,filterEndDate,filterNow), sort: sortColumn, direction: sortDirection }
@@ -1536,13 +1548,33 @@ function MasterLeadTable({
                   onChange={e => setTransferCallStatus(e.target.value)} 
                   style={inputStyle}
                 >
-                  <option value="">Select Status...</option>
+                  <option value="">All Call Statuses</option>
                   <option value="UNTOUCHED">Untouched</option>
                   <option value="CALL_CONNECTED">Call Connected</option>
                   <option value="CALL_NOT_CONNECTED">Call Not Connected</option>
                   {extraCallStatuses.map(status => (
                     <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={labelStyle}>Lead Status / Active Status</label>
+                <select 
+                  value={transferLeadStatus} 
+                  onChange={e => setTransferLeadStatus(e.target.value)} 
+                  style={inputStyle}
+                >
+                  <option value="">All Leads</option>
+                  <option value="IN_PROGRESS">Active Leads (In Progress)</option>
+                  <option value="CLOSED">Closed</option>
+                  <option value="CLOSED_FULL_PAYMENT">Full Payment Done (Close)</option>
+                  {dropdowns?.['Lead Status'] && dropdowns['Lead Status']
+                    .filter(s => !['IN_PROGRESS', 'CLOSED', 'CLOSED_FULL_PAYMENT', 'In Progress', 'Closed', 'Full Payment Done (Close)'].includes(s))
+                    .map(status => (
+                      <option key={status} value={status}>{status}</option>
+                    ))
+                  }
                 </select>
               </div>
 
@@ -1591,8 +1623,8 @@ function MasterLeadTable({
               </button>
               <button 
                 onClick={async () => {
-                  if (!transferFromUser || !transferToUser || !transferCallStatus || !transferCount) {
-                    toast.error('Please fill all fields');
+                  if (!transferFromUser || !transferToUser || !transferCount) {
+                    toast.error('Please select From Executive, To Executive, and number of leads');
                     return;
                   }
                   if (transferFromUser === transferToUser) {
@@ -1606,7 +1638,7 @@ function MasterLeadTable({
                   
                   setIsTransferring(true);
                   try {
-                    const res = await transferLeadsBulkAction(transferFromUser, transferToUser, transferCallStatus, Number(transferCount), transferWebinar);
+                    const res = await transferLeadsBulkAction(transferFromUser, transferToUser, transferCallStatus, Number(transferCount), transferWebinar, transferLeadStatus);
                     if (res.error) {
                       toast.error(res.error);
                     } else {
@@ -1616,6 +1648,7 @@ function MasterLeadTable({
                       setTransferToUser('');
                       setTransferCallStatus('');
                       setTransferWebinar('');
+                      setTransferLeadStatus('');
                       setTransferCount('');
                       setCountResult(null);
                       router.refresh();
@@ -1627,7 +1660,7 @@ function MasterLeadTable({
                 }}
                 className="btn btn-primary"
                 style={{ padding: '8px 16px', background: 'var(--primary)', color: 'var(--foreground)', border: 'none', borderRadius: '8px' }}
-                disabled={isTransferring || !transferFromUser || !transferToUser || !transferCallStatus || !transferCount}
+                disabled={isTransferring || !transferFromUser || !transferToUser || !transferCount || !availableLeadsCount}
               >
                 {isTransferring ? 'Transferring...' : 'Transfer Leads'}
               </button>
